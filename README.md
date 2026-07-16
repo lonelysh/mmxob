@@ -1,122 +1,132 @@
 # MiniMax Assistant for Obsidian
 
-> 在 Obsidian 中调用 MiniMax（MiniMax）国内版大模型：**侧边栏聊天 + 选中文本 AI 操作 + 整篇笔记处理**，兼容桌面端与 iOS。
+[![Obsidian Plugin](https://img.shields.io/badge/Obsidian-Plugin-blueviolet)](https://obsidian.md/plugins)
+[![Mobile](https://img.shields.io/badge/mobile-supported-green)](#ios-compatibility)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Min App Version](https://img.shields.io/badge/min--app--version-1.5.0-purple)](#)
 
-## 功能
+Use **MiniMax (MiniMax)** Chinese large language models inside Obsidian: sidebar chat, selection AI actions, and full-note processing. **iOS compatible** (works on iPhone and iPad via Obsidian Mobile).
 
-| 模块 | 入口 | 说明 |
-|------|------|------|
-| 侧边栏聊天 | Ribbon「消息气泡」图标，或命令 `MiniMax: 打开侧边栏聊天` | 流式输出，可注入当前笔记作为上下文 |
-| 选中文本 AI 操作 | 编辑器菜单 / 命令面板 | 翻译（英↔中）、解释、总结、润色、口语化、自定义 Prompt |
-| 整篇笔记命令 | 命令面板 | 总结当前笔记、生成大纲、续写、修正错别字 |
-| API 连通性测试 | 设置面板或命令 `MiniMax: 测试 API 连通性` | 用当前配置发一次 1-token 请求 |
+## Features
 
-## 安装
+| Module | Entry Point | What It Does |
+|---|---|---|
+| Sidebar chat | Ribbon "message bubble" icon, or command `MiniMax: Open Sidebar Chat` | Streaming SSE output, optionally injects the active note as context |
+| Selection AI actions | Editor menu / command palette | Translate (EN ↔ ZH), explain, summarize, polish, casualize, custom prompt |
+| Full-note commands | Command palette | Summarize active note, generate outline, continue writing, fix typos |
+| API connectivity test | Settings tab or command `MiniMax: Test API Connection` | Sends a 1-token request with the current configuration |
 
-### 方式 A：手动（推荐）
-1. 从 Release 下载 `mmxob.zip` 或 `main.js` + `styles.css` + `manifest.json`。
-2. 解压到你的 vault 的 `.obsidian/plugins/mmxob/`。
-3. 在 Obsidian → 设置 → 第三方插件 → 已安装插件中启用 **MiniMax Assistant**。
+## Installation
 
-### 方式 B：源码开发
+### Option A — Manual install
+1. Download `main.js`, `styles.css`, and `manifest.json` from the latest [release](../../releases/latest).
+2. Place them under `<your-vault>/.obsidian/plugins/mmxob/`.
+3. In Obsidian → Settings → Community plugins → enable **MiniMax Assistant**.
+
+### Option B — From source
 ```bash
-git clone <repo>
+git clone https://github.com/lonelysh/mmxob.git
 cd mmxob
 npm install
-npm run dev        # 开发模式，自动 watch
-npm run build      # 生产构建
+npm run dev        # watch mode
+npm run build      # type-check + production build
 ```
 
-### 方式 C：BRAT（iOS 测试）
-把仓库地址加进 BRAT → "Add Beta plugin"，安装 `mmxob`。
+### Option C — BRAT (recommended for iOS testing)
+1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin in Obsidian Mobile.
+2. BRAT → **Add Beta plugin** → enter `lonelysh/mmxob`.
+3. Enable **MiniMax Assistant** in Community plugins.
 
-## 快速开始
+## Quick Start
 
-1. 打开设置 → 第三方插件 → **MiniMax Assistant**。
-2. 在 **API Key** 输入在 [platform.minimaxi.com](https://platform.minimaxi.com) 创建的 Key。
-3. **Base URL** 默认 `https://api.minimaxi.com/v1`，按需修改：
-   - 海外站：`https://api.minimax.io/v1`
-   - 自建/代理：填你自己的 URL
-4. 选模型（推荐 `MiniMax-M3`）。
-5. 点 **测试 API**，看到 "OK" 即配置完成。
-6. 在右侧栏打开 Chat，或者选中一段文本试试"翻译为英文"。
+1. Open Settings → Community plugins → **MiniMax Assistant**.
+2. Paste your API key (create one at [platform.minimaxi.com](https://platform.minimaxi.com)).
+3. Leave **Base URL** at `https://api.minimaxi.com/v1`, or change it:
+   - International: `https://api.minimax.io/v1`
+   - Self-hosted / proxy: your own endpoint
+4. Pick a model (default `MiniMax-M3`).
+5. Click **Test API** — a `Notice` with `OK` confirms the setup.
+6. Open the chat from the ribbon, or select some text and try **Translate to English**.
 
-## 关键字段速查
+## Settings Reference
 
-| 设置项 | 默认 | 说明 |
-|--------|------|------|
-| Base URL | `https://api.minimaxi.com/v1` | 国内站；与 API Key 必须同区 |
-| 模型 | `MiniMax-M3` | 长上下文 + 工具调用 + 多模态 |
-| Temperature | 0.7 | 0=确定，2=发散 |
-| Max Tokens | 4096 | M3 上限 65536 |
-| System Prompt | 内置中文提示 | 每次请求都带上 |
-| 注入笔记上下文 | 开 | 新一轮对话自动把当前笔记拼入 system |
+| Field | Default | Notes |
+|---|---|---|
+| Base URL | `https://api.minimaxi.com/v1` | Must match the region of your API key |
+| Model | `MiniMax-M3` | Long context + tool use + multimodal |
+| Temperature | 0.7 | 0 = deterministic, 2 = creative |
+| Max Tokens | 4096 | M3 supports up to 65536 |
+| System Prompt | Built-in bilingual prompt | Sent on every request |
+| Inject note context | On | Automatically prepends the active note to the chat history |
+| Custom selection prompt | Empty | Used by **MiniMax: Selection → Custom Prompt** |
 
-## iOS 兼容性说明
+## iOS Compatibility
 
-本插件在移动端做以下特别处理：
+The plugin ships with mobile-friendly defaults:
 
-- `manifest.json` 中 `isDesktopOnly: false`，iOS / Android 均可见
-- 触摸目标 ≥ 44×44px，符合 WCAG 与 iOS HIG
-- `padding` 使用 `env(safe-area-inset-*)`，兼容刘海屏 / iPad 分屏
-- 没有 `position: fixed` 作为主布局，没有 hover-only 交互
-- 没有 `backdrop-filter` 影响 fixed 子元素
-- 网络层首选 `fetch()` + AbortController（流式），失败时自动回退到 Obsidian `requestUrl()`（受 iOS CORS 保护，非流式兜底）
-- 网络请求全部走 HTTPS
-- 设置面板底部给 iOS 用户显示额外提示
+- `manifest.json` declares `isDesktopOnly: false` — visible on iOS / Android
+- Touch targets ≥ 44×44 px (WCAG / iOS HIG)
+- `padding` uses `env(safe-area-inset-*)` to respect notch and home-indicator
+- No `position: fixed` for the main layout; no hover-only interactions
+- No `backdrop-filter` on layout containers (would trap `fixed` children)
+- Network layer prefers `fetch()` + AbortController (streaming); on failure it falls back to Obsidian's `requestUrl()` (no CORS issues, non-streaming)
+- All requests are HTTPS only
+- The settings tab shows an extra hint when running on iOS
 
-## 错误码速查
+To debug iOS specifically, connect the device to a Mac over USB, enable iOS Settings → Safari → Advanced → **Web Inspector**, and attach from Safari's **Develop** menu.
 
-| HTTP / 业务码 | 含义 | 用户动作 |
-|---------------|------|----------|
-| 401 / 1004 / 2049 | 鉴权失败 | 检查 API Key；检查 Base URL 是否与 Key 同区 |
-| 1008 | 余额不足 | 充值 |
-| 429 / 1002 / 1039 / 2045 / 2056 | 限流 | 等待重试；降频；调低 max_tokens |
-| 1026 | 输入敏感 | 改写输入 |
-| 1027 | 输出敏感 | 调整 prompt 或换种问法 |
-| 500+ / 1013 / 1033 | 服务端错误 | 稍后重试 |
-| iOS 流式失败 | CORS / 网络 | 自动回退到非流式 |
+## Error Code Reference
 
-## 文件结构
+| HTTP / Code | Meaning | Suggested Action |
+|---|---|---|
+| 401 / 1004 / 2049 | Authentication failed | Check API key; verify Base URL matches key region |
+| 1008 | Insufficient balance | Top up your account |
+| 429 / 1002 / 1039 / 2045 / 2056 | Rate limited | Wait and retry; reduce call frequency or lower `max_tokens` |
+| 1026 | Input flagged as sensitive | Rephrase the input |
+| 1027 | Output flagged as sensitive | Adjust the prompt or reformulate the question |
+| 5xx / 1013 / 1033 | Server-side error | Retry after a short delay |
+| iOS streaming failed | CORS / network | Plugin auto-falls back to non-streaming |
+
+## Project Structure
 
 ```
 mmxob/
 ├── manifest.json              # isDesktopOnly: false
 ├── package.json               # esbuild + typescript
 ├── tsconfig.json
-├── esbuild.config.mjs
+├── esbuild.config.mjs         # build script (watch + production)
+├── version-bump.mjs
 ├── versions.json
-├── styles.css                 # mobile-first, 44px, safe-area
+├── styles.css                 # mobile-first, 44px touch targets, safe-area
 └── src/
-    ├── main.ts                # 入口、注册视图与命令
-    ├── constants.ts           # 模型列表、默认 URL、预设操作
+    ├── main.ts                # entry: register view + commands
+    ├── constants.ts           # model list, default URL, presets
     ├── settings/
-    │   ├── defaults.ts        # 默认配置
-    │   └── SettingsTab.ts     # 设置 UI
+    │   ├── defaults.ts        # default configuration
+    │   └── SettingsTab.ts     # settings UI
     ├── api/
-    │   ├── types.ts           # ChatMessage / Request / Response
-    │   ├── errors.ts          # 错误归一化（含 1004/1008/1026/1027）
-    │   ├── streaming.ts       # SSE 解析器
-    │   └── client.ts          # MiniMaxClient（流式 + requestUrl 兜底）
+    │   ├── types.ts           # ChatMessage / Request / Response types
+    │   ├── errors.ts          # error normalization (1004 / 1008 / 1026 / 1027 / ...)
+    │   ├── streaming.ts       # SSE parser
+    │   └── client.ts          # MiniMaxClient: streaming + requestUrl fallback
     ├── views/
-    │   └── ChatView.ts        # 侧边栏聊天视图
+    │   └── ChatView.ts        # sidebar chat view
     ├── commands/
-    │   ├── selection.ts       # 选中文本 AI 操作
-    │   └── note.ts            # 整篇笔记处理
+    │   ├── selection.ts       # selection AI actions
+    │   └── note.ts            # full-note commands
     └── utils/
-        ├── markdown.ts        # （占位）Markdown 工具
-        ├── mobile.ts          # Platform.isIosApp 工具
-        └── prompt.ts          # 占位符模板、截断
+        ├── mobile.ts          # Platform.isIosApp helper
+        └── prompt.ts          # template placeholders, truncation
 ```
 
-## 开发脚本
+## Development Scripts
 
 ```bash
-npm run dev      # watch 模式
-npm run build    # 类型检查 + 生产打包
-npm run version  # bump 版本号（会同时更新 manifest.json 与 versions.json）
+npm run dev      # esbuild watch mode
+npm run build    # tsc --noEmit + esbuild production bundle
+npm run version  # bump version in manifest.json and versions.json
 ```
 
-## 许可证
+## License
 
-MIT
+[MIT](LICENSE)
