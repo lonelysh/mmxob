@@ -22,13 +22,6 @@
   box-sizing: border-box;
 }
 
-/* 会话消息计数：状态行右侧灰色小字 */
-.volo-chat-session-indicator {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
 /* 通用小图标按钮：36×36 紧凑触屏 */
 .volo-icon-btn {
   appearance: none;
@@ -206,27 +199,38 @@
   flex-direction: column;
   gap: 6px;
 }
-/* v0.1.2 顶部状态条：slim 行，只放状态 + 会话计数 + ⚙（v0.1.1 的返回按钮已删除）。 */
-.volo-top-bar {
+/* ===========================================================
+   v0.1.4 — Top bar polish
+   - No background (was var(--background-secondary))
+   - "Volo" brand label replaces "就绪"
+   - Smaller context line shows filename + selection range
+   =========================================================== */
+.volo-chat-top-bar,
+.volo-ao-top-bar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 4px 10px;
   border-bottom: 1px solid var(--background-modifier-border);
-  background: var(--background-secondary);
+  background: transparent;
   font-size: var(--font-ui-small, 12px);
   color: var(--text-muted);
   flex: 0 0 auto;
 }
-.volo-top-bar .volo-chat-status {
+.volo-chat-brand {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-normal);
   flex: 0 0 auto;
 }
-.volo-top-bar .volo-chat-session-indicator {
-  flex: 1 1 auto;
-  text-align: right;
-}
-.volo-chat-status {
+.volo-context-line {
   font-size: 11px;
+  color: var(--text-muted);
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .volo-chat-composer-row {
@@ -332,7 +336,8 @@
   .volo-chat-messages {
     padding: 6px 8px;
   }
-  .volo-top-bar {
+  .volo-chat-top-bar,
+  .volo-ao-top-bar {
     padding-left: 8px;
     padding-right: 8px;
   }

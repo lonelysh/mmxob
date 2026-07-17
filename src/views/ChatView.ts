@@ -1,10 +1,11 @@
-import { ItemView, WorkspaceLeaf, MarkdownRenderer, MarkdownView, Notice, TFile, Menu } from "obsidian";
+import { ItemView, WorkspaceLeaf, MarkdownRenderer, MarkdownView, Notice, TFile, TFolder, Menu } from "obsidian";
 import { VIEW_TYPE_CHAT, QUICK_PROMPTS, QuickPrompt } from "../constants";
 import type VoloPlugin from "../main";
 import { chat } from "../api/client";
 import { ProviderError } from "../api/errors";
 import { ChatMessage } from "../api/types";
 import { search, formatHitsForLLM, SearchProvider, SearchOptions } from "../api/search";
+import { FolderSuggestModal } from "./FolderSuggestModal";
 import {
   truncateByChars,
   noteContextBlock,
@@ -32,11 +33,12 @@ export class ChatView extends ItemView {
   private sendBtn!: HTMLButtonElement;
   private stopBtn!: HTMLButtonElement;
   private statusEl!: HTMLElement;
-  private sessionIndicatorEl!: HTMLElement;
+  private contextLine!: HTMLElement;
   private gearBtn!: HTMLButtonElement;
   private messages: UiMessage[] = [];
   private inflight: AbortController | null = null;
   private streamingOn = true;
+  private contextRefreshTimer: number | null = null;
   private insideThink = false;
   /** 当前 assistant DOM 节点（用于增量更新） */
   private currentAssistantEl: HTMLElement | null = null;
@@ -50,6 +52,9 @@ export class ChatView extends ItemView {
   private searchPill!: HTMLButtonElement;
   /** 快捷提示 pill（v0.1.3：移至顶栏 pillCluster 中）。 */
   private quickMenuPill!: HTMLButtonElement;
+  private activeFolder: TFolder | null = null;
+  private folderPill!: HTMLButtonElement;
+  private obsidianPill!: HTMLButtonElement;
   /** quick prompt 互斥锁：避免双击导致并发请求。 */
   private quickPromptInFlight = false;
 
@@ -76,15 +81,12 @@ export class ChatView extends ItemView {
     root.addClass("volo-chat-root");
     this.rootEl = root;
 
-    /* -------- 顶部状态条：状态 + 会话计数 + 🔍/⚡ pills + ⚙（v0.1.3 pill 移入） -------- */
-    const topBar = root.createDiv({ cls: "volo-top-bar" });
-    this.statusEl = topBar.createSpan({ cls: "volo-chat-status", text: "就绪" });
-    this.sessionIndicatorEl = topBar.createSpan({
-      cls: "volo-chat-session-indicator",
-      text: ` · ${this.messages.length} 条`,
-    });
+    /* -------- 顶部状态条：Volo + 文件上下文 + 🔍/⚡/📁/Obsidian pills + ⚙ -------- */
+    const topBar = root.createDiv({ cls: "volo-chat-top-bar" });
+    this.statusEl = topBar.createSpan({ cls: "volo-chat-brand", text: "Volo" });
+    this.contextLine = topBar.createSpan({ cls: "volo-context-line", text: "" });
 
-    /* v0.1.3 — pill 簇（顶栏右侧），承载搜索 / 快捷两颗 pill */
+    /* v0.1.4 — pill 簇（顶栏右侧），承载搜索 / 快捷 / 文件夹 / Obsidian 语法 */
     this.pillCluster = topBar.createDiv({ cls: "volo-pill-cluster" });
 
     /* 🔍 联网搜索 pill（toggle，激活时获得 .is-active） */
@@ -105,6 +107,23 @@ export class ChatView extends ItemView {
     this.quickMenuPill.createSpan({ cls: "volo-pill-label", text: "快捷" });
     this.quickMenuPill.addEventListener("click", (ev) => this.openQuickMenu(ev));
 
+    /* 📁 文件夹选择 pill */
+    this.folderPill = this.pillCluster.createEl("button", {
+      cls: "volo-pill",
+      attr: { "aria-label": "选择文件夹", title: "选择文件夹（用于跨文件操作）" },
+    });
+    this.folderPill.createSpan({ text: "📁", cls: "volo-pill-icon" });
+    this.folderPill.createSpan({ text: "文件夹", cls: "volo-pill-label" });
+    this.folderPill.addEventListener("click", () => this.pickFolder());
+
+    /* Obsidian 语法辅助 pill */
+    this.obsidianPill = this.pillCluster.createEl("button", {
+      cls: "volo-pill",
+      attr: { "aria-label": "Obsidian 语法", title: "Obsidian 语法" },
+    });
+    this.obsidianPill.createSpan({ text: "Obsidian", cls: "volo-pill-label" });
+    this.obsidianPill.addEventListener("click", (ev) => this.openObsidianMenu(ev));
+
     /* ⚙ 会话菜单（保留在状态行尾部） */
     this.gearBtn = topBar.createEl("button", {
       cls: "volo-chat-quick-gear",
@@ -112,6 +131,11 @@ export class ChatView extends ItemView {
       text: "⚙",
     });
     this.gearBtn.addEventListener("click", (ev) => this.openGearMenu(ev));
+
+    this.refreshContextLine();
+    this.registerEvent(this.plugin.app.workspace.on("file-open", () => this.refreshContextLine()));
+    this.registerEvent(this.plugin.app.workspace.on("active-leaf-change", () => this.refreshContextLine()));
+    this.startContextRefresh();
 
     this.streamingOn = true;
 
@@ -165,13 +189,16 @@ export class ChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.stopContextRefresh();
     this.abort();
   }
 
   /* ---------------- 状态机 ---------------- */
 
   private setStatus(text: string) {
-    this.statusEl.textContent = text;
+    // The compact top bar is branded as Volo; retain operation status for diagnostics
+    // without replacing the brand label.
+    if (this.statusEl) this.statusEl.setAttribute("data-status", text);
   }
 
   private setBusy(busy: boolean) {
@@ -197,7 +224,6 @@ export class ChatView extends ItemView {
 
   private renderAll() {
     this.messagesEl.empty();
-    this.updateSessionIndicator();
     if (this.messages.length === 0) {
       this.renderEmptyQuickCards();
       return;
@@ -275,7 +301,7 @@ export class ChatView extends ItemView {
         text: "插入光标",
         attr: { "aria-label": "插入到当前光标位置" },
       });
-      insertBtn.addEventListener("click", () => this.insertAtCursor(m.content));
+      insertBtn.addEventListener("click", () => this.insertAssistantAtCursor(m.content));
 
       const replaceBtn = actions.createEl("button", {
         cls: "volo-msg-action-btn",
@@ -313,7 +339,6 @@ export class ChatView extends ItemView {
     const m: UiMessage = { role: "user", content, ts: Date.now() };
     this.messages.push(m);
     this.renderMessage(m);
-    this.updateSessionIndicator();
     this.scrollToBottom();
   }
 
@@ -324,7 +349,6 @@ export class ChatView extends ItemView {
     this.insideThink = false;
     this.currentAssistantEl = this.renderMessage(m);
     this.currentAssistantEl.classList.add("volo-streaming");
-    this.updateSessionIndicator();
     this.scrollToBottom();
   }
 
@@ -475,9 +499,91 @@ export class ChatView extends ItemView {
     new Notice("已开启新会话");
   }
 
-  private updateSessionIndicator() {
-    if (!this.sessionIndicatorEl) return;
-    this.sessionIndicatorEl.textContent = ` · ${this.messages.length} 条`;
+  private refreshContextLine(): void {
+    const file = this.plugin.app.workspace.getActiveFile();
+    if (!(file instanceof TFile) || file.extension !== "md") {
+      this.contextLine.textContent = "无文件";
+      return;
+    }
+
+    const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+    const selection = view?.editor?.getSelection() ?? "";
+    if (selection) {
+      const from = view!.editor.getCursor("from");
+      const to = view!.editor.getCursor("to");
+      const lineCount = to.line - from.line + 1;
+      this.contextLine.textContent =
+        `${file.basename}.md · Line${from.line + 1}-Line${to.line + 1}, ${lineCount}Lines`;
+      return;
+    }
+    this.contextLine.textContent = `${file.basename}.md`;
+  }
+
+  private startContextRefresh(): void {
+    if (this.contextRefreshTimer !== null) return;
+    this.contextRefreshTimer = window.setInterval(() => this.refreshContextLine(), 1000);
+  }
+
+  private stopContextRefresh(): void {
+    if (this.contextRefreshTimer !== null) {
+      window.clearInterval(this.contextRefreshTimer);
+      this.contextRefreshTimer = null;
+    }
+  }
+
+  private pickFolder(): void {
+    new FolderSuggestModal(this.plugin.app, (folder) => {
+      this.activeFolder = folder;
+      if (this.folderPill) {
+        const labelEl = this.folderPill.querySelector(".volo-pill-label") as HTMLElement | null;
+        if (labelEl) labelEl.textContent = folder ? folder.name : "文件夹";
+        this.folderPill.toggleClass("is-active", folder !== null);
+      }
+      new Notice(folder ? `📁 ${folder.path}` : "已取消文件夹选择");
+    }).open();
+  }
+
+  private openObsidianMenu(ev: MouseEvent): void {
+    const items: Array<{ label: string; insert: string }> = [
+      { label: "内部链接", insert: "[[笔记名]]" },
+      { label: "嵌入笔记", insert: "![[笔记名]]" },
+      { label: "块引用", insert: "[[笔记名#^块ID]]" },
+      { label: "标题段落", insert: "[[笔记名#标题]]" },
+      { label: "标签", insert: "#标签" },
+      { label: "嵌套标签", insert: "#父/子" },
+      { label: "任务（未完成）", insert: "- [ ] " },
+      { label: "任务（已完成）", insert: "- [x] " },
+      { label: "高亮", insert: "==高亮==" },
+      { label: "加粗", insert: "**加粗**" },
+      { label: "斜体", insert: "*斜体*" },
+      { label: "行内代码", insert: "`code`" },
+      { label: "代码块", insert: "```\n\n```" },
+      { label: "引用", insert: "> " },
+      { label: "分割线", insert: "---" },
+    ];
+    const menu = new Menu();
+    for (const item of items) {
+      menu.addItem((it) =>
+        it.setTitle(item.label).onClick(() => this.insertAtCursor(item.insert)),
+      );
+    }
+    menu.showAtMouseEvent(ev);
+  }
+
+  private insertAtCursor(text: string): void {
+    const input = this.inputEl;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    const value = input.value;
+    input.value = value.slice(0, start) + text + value.slice(end);
+    if (text === "```\n\n```") {
+      const caret = start + 4;
+      input.selectionStart = input.selectionEnd = caret;
+    } else {
+      const caret = start + text.length;
+      input.selectionStart = input.selectionEnd = caret;
+    }
+    input.focus();
   }
 
   private focusActiveEditor(): void {
@@ -516,7 +622,7 @@ export class ChatView extends ItemView {
    * （保留本注释仅为 git blame 留痕。）
    */
 
-  private async insertAtCursor(content: string): Promise<void> {
+  private async insertAssistantAtCursor(content: string): Promise<void> {
     const view = this.findMarkdownView();
     if (!view) {
       new Notice("请先打开 Markdown 笔记");
@@ -568,7 +674,22 @@ export class ChatView extends ItemView {
       new Notice("请先打开 Markdown 笔记");
       return;
     }
-    view.editor.setValue(stripThinkingFully(content));
+    const file = view.file;
+    if (!(file instanceof TFile)) {
+      new Notice("请先打开 Markdown 笔记");
+      return;
+    }
+    const currentValue = view.editor.getValue();
+    // Detect whether the file already has an H1 title (# ...) anywhere.
+    const hasH1 = /^#\s+\S+/m.test(currentValue);
+
+    let finalContent = content;
+    if (!hasH1) {
+      // No title in the original — prepend one based on the file name.
+      finalContent = `# ${file.basename}\n\n${content}`;
+    }
+
+    view.editor.setValue(finalContent);
     new Notice("已替换当前笔记");
   }
 

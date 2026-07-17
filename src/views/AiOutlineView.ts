@@ -35,6 +35,8 @@ interface Section {
 export class AiOutlineView extends ItemView {
   private plugin: VoloPlugin;
   private rootEl!: HTMLElement;
+  private contextLine!: HTMLElement;
+  private contextRefreshTimer: number | null = null;
   private outlineEl!: HTMLElement;
   private messagesEl!: HTMLElement;
   private inputEl!: HTMLTextAreaElement;
@@ -84,7 +86,16 @@ export class AiOutlineView extends ItemView {
     root.addClass("volo-ao-root");
     this.rootEl = root;
 
-    /* -------- 头部（标题 + ⚙） -------- */
+    /* -------- 紧凑上下文栏：Volo + 当前文件/选区 -------- */
+    const topBar = root.createDiv({ cls: "volo-ao-top-bar" });
+    topBar.createSpan({ cls: "volo-chat-brand", text: "Volo" });
+    this.contextLine = topBar.createSpan({ cls: "volo-context-line", text: "" });
+    this.refreshContextLine();
+    this.registerEvent(this.plugin.app.workspace.on("file-open", () => this.refreshContextLine()));
+    this.registerEvent(this.plugin.app.workspace.on("active-leaf-change", () => this.refreshContextLine()));
+    this.startContextRefresh();
+
+    /* -------- 头部（标题 + ⚙，位于上下文栏下方） -------- */
     const header = root.createDiv({ cls: "volo-ao-header" });
     header.createSpan({ cls: "volo-ao-header-title", text: "AI 大纲" });
     const gearBtn = header.createEl("button", {
@@ -178,10 +189,43 @@ export class AiOutlineView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.stopContextRefresh();
     this.abort();
   }
 
   /* ---------------- 状态 / 工具 ---------------- */
+
+  private refreshContextLine(): void {
+    const file = this.plugin.app.workspace.getActiveFile();
+    if (!(file instanceof TFile) || file.extension !== "md") {
+      this.contextLine.textContent = "无文件";
+      return;
+    }
+
+    const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+    const selection = view?.editor?.getSelection() ?? "";
+    if (selection) {
+      const from = view!.editor.getCursor("from");
+      const to = view!.editor.getCursor("to");
+      const lineCount = to.line - from.line + 1;
+      this.contextLine.textContent =
+        `${file.basename}.md · Line${from.line + 1}-Line${to.line + 1}, ${lineCount}Lines`;
+      return;
+    }
+    this.contextLine.textContent = `${file.basename}.md`;
+  }
+
+  private startContextRefresh(): void {
+    if (this.contextRefreshTimer !== null) return;
+    this.contextRefreshTimer = window.setInterval(() => this.refreshContextLine(), 1000);
+  }
+
+  private stopContextRefresh(): void {
+    if (this.contextRefreshTimer !== null) {
+      window.clearInterval(this.contextRefreshTimer);
+      this.contextRefreshTimer = null;
+    }
+  }
 
   private setStatus(text: string): void {
     if (this.statusEl) this.statusEl.textContent = text;
