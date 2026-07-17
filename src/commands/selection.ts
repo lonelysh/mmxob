@@ -102,10 +102,22 @@ async function runSelectionPrompt(
       // 选中文本操作保持简单：流式优先，但客户端会自动在 iOS 兜底到 requestUrl
       onDelta: (d) => {
         acc += d;
+        // 实时用累积的内容替换占位，让流式过程可见
         const cur = editor.getValue();
-        const replaced = cur.replace(placeholder, acc + placeholder);
-        if (replaced !== cur) {
-          // 注意：replaceSelection 会移动光标；这里直接全量 setValue 会破坏选区，简化方案：保留占位，后续整段替换
+        const next = cur.replace(placeholder, acc);
+        if (next !== cur) {
+          // 使用 setValue 而不是 editor.transaction，因为我们的占位是无歧义的字符串
+          editor.setValue(next);
+          // 保持光标在累积文本末尾
+          const pos = editor.posToOffset({ line: 0, ch: 0 });
+          // cursor in setValue-based replacements is unreliable; force caret to end of inserted text
+          const tail = next.lastIndexOf(placeholder) >= 0 ? next : next;
+          // Simpler: place caret right after the placeholder's last position.
+          // Use the simplest deterministic approach: find the inserted text length in next and set caret there.
+          const insertedEndOffset = next.indexOf(acc) >= 0
+            ? next.indexOf(acc) + acc.length
+            : next.length;
+          editor.setCursor(editor.offsetToPos(insertedEndOffset));
         }
       },
     });

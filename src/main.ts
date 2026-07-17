@@ -31,20 +31,6 @@ export default class VoloPlugin extends Plugin {
     // Ribbon：打开 AI 大纲视图
     this.addRibbonIcon("list-tree", "Volo：右侧栏打开 AI 大纲", () => this.activateAiOutlineView());
 
-    // 命令：直接打开 Chat 视图
-    this.addCommand({
-      id: "volo-open-chat",
-      name: "Volo: 打开侧边栏聊天",
-      callback: () => this.activateChatView(),
-    });
-
-    // 命令：直接打开 AI 大纲视图
-    this.addCommand({
-      id: "volo-open-ai-outline",
-      name: "Volo: 打开 AI 大纲",
-      callback: () => this.activateAiOutlineView(),
-    });
-
     // 命令：复制 API Key 健康检查入口
     this.addCommand({
       id: "volo-test-connection",
