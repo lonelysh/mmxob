@@ -1,0 +1,237 @@
+# scripts/release.ps1 - One-shot Volo release script.
+#
+# Usage:
+#   pwsh scripts/release.ps1 <version> [options]
+#
+# Examples:
+#   pwsh scripts/release.ps1 0.1.9
+#   pwsh scripts/release.ps1 0.1.9 -SkipBuild -NotesFile mynotes.md
+#   pwsh scripts/release.ps1 0.1.9 -DryRun
+#   pwsh scripts/release.ps1 0.1.9 -MinAppVersion 1.6.0
+#
+# What it does:
+#   1. Reads GH_TOKEN/GH_TOKENS/GITHUB_TOKEN from User scope (no manual paste).
+#   2. Bumps manifest.json -> version, keeps/resets minAppVersion.
+#   3. Adds the new version entry to versions.json.
+#   4. Runs `npm run build` to regenerate main.js (skippable).
+#   5. Commits, tags (vX.Y.Z), pushes main + tag.
+#   6. Creates a GitHub Release with notes from -NotesFile (or a placeholder).
+#   7. Uploads manifest.json, main.js, styles.css as release assets so BRAT works.
+#
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true, Position = 0)]
+    [ValidatePattern('^\d+\.\d+\.\d+([-.][0-9A-Za-z.]+)?$')]
+    [string]$Version,
+
+    [string]$NotesFile,
+
+    [switch]$SkipBuild,
+
+    [switch]$DryRun,
+
+    [string]$MinAppVersion,
+
+    [string]$Repo = 'lonelysh/volo'
+)
+
+$ErrorActionPreference = 'Stop'
+Set-Location (Split-Path -Parent $PSScriptRoot)
+
+# ---- helpers ---------------------------------------------------------------
+
+function Get-GitHubToken {
+    $candidates = @('GH_TOKEN', 'GITHUB_TOKEN', 'GH_TOKENS')
+    foreach ($name in $candidates) {
+        $t = [System.Environment]::GetEnvironmentVariable($name, 'User')
+        if ($t) { return $t }
+    }
+    throw 'No GitHub token. Set GH_TOKEN at User scope.'
+}
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host "==> $Message" -ForegroundColor Cyan
+}
+
+function Retry-Block {
+    param(
+        [ScriptBlock]$Block,
+        [int]$Attempts = 5,
+        [int]$InitialBackoff = 5
+    )
+    $lastErr = $null
+    for ($i = 1; $i -le $Attempts; $i++) {
+        try {
+            & $Block
+            if ($LASTEXITCODE -eq 0) { return }
+            $lastErr = "exit code $LASTEXITCODE"
+        } catch {
+            $lastErr = $_.Exception.Message
+        }
+        if ($i -lt $Attempts) {
+            $delay = $InitialBackoff * $i
+            Write-Warning "attempt $i failed ($lastErr); retrying in ${delay}s"
+            Start-Sleep -Seconds $delay
+        }
+    }
+    throw "Operation failed after $Attempts attempts. Last error: $lastErr"
+}
+
+# ---- 0. verify state -------------------------------------------------------
+
+$tag = "v$Version"
+
+if (git rev-parse -q --verify "refs/tags/$tag" 2>$null) {
+    throw "Tag $tag already exists locally. Bump to a new version or `git tag -d $tag` first."
+}
+
+if (-not (Test-Path 'manifest.json') -or -not (Test-Path 'versions.json')) {
+    throw 'manifest.json / versions.json missing; run from repo root.'
+}
+
+# ---- 1. resolve token and set process env ---------------------------------
+
+$tok = Get-GitHubToken
+$env:GH_TOKEN = $tok
+$env:GITHUB_TOKEN = $tok
+# Seed git credential store so any push authenticates without re-entry.
+"protocol=https`nhost=github.com`nusername=x-access-token`npassword=$tok" | git credential approve | Out-Null
+
+# Force UTF-8 in this session so `gh` reads/writes release notes cleanly.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+chcp 65001 | Out-Null
+
+# ---- 2. update manifest.json ----------------------------------------------
+
+$manifestPath = Resolve-Path 'manifest.json'
+$manifest = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
+$prevVersion = $manifest.version
+
+if (-not $MinAppVersion) {
+    $existing = Get-Content -Raw -Path 'versions.json' | ConvertFrom-Json
+    $sorted = $existing.PSObject.Properties |
+        Where-Object { $_.Name -match '^\d+\.\d+\.\d+' } |
+        Sort-Object Name
+    if ($sorted) {
+        # Reuse the most recent known minAppVersion; user can override.
+        $MinAppVersion = $sorted[-1].Value
+    } else {
+        $MinAppVersion = $manifest.minAppVersion
+    }
+}
+
+$manifest.version = $Version
+$manifest.minAppVersion = $MinAppVersion
+$newManifestJson = $manifest | ConvertTo-Json -Depth 10
+$newManifestJson + "`n" | Out-File -FilePath $manifestPath -Encoding utf8 -NoNewline
+
+# ---- 3. update versions.json ----------------------------------------------
+
+$versions = Get-Content -Raw -Path 'versions.json' | ConvertFrom-Json
+if ($versions.PSObject.Properties.Name -contains $Version) {
+    Write-Warning "versions.json already has key $Version; skipping add"
+} else {
+    $versions | Add-Member -NotePropertyName $Version -NotePropertyValue $MinAppVersion -Force
+    ($versions | ConvertTo-Json -Depth 5) + "`n" | Out-File -FilePath 'versions.json' -Encoding utf8 -NoNewline
+}
+
+Write-Step "manifest.json -> version=$Version, minAppVersion=$MinAppVersion (was $prevVersion)"
+Write-Step "versions.json -> added $Version : $MinAppVersion"
+
+# ---- 4. build (optional) --------------------------------------------------
+
+if ($SkipBuild) {
+    Write-Step "Skipping build (existing main.js will be used)"
+} else {
+    Write-Step "npm run build"
+    if (-not $DryRun) {
+        Retry-Block -Block { npm run build } -Attempts 3 -InitialBackoff 3
+    }
+}
+
+# ---- 5. resolve release notes ---------------------------------------------
+
+if (-not $NotesFile -or -not (Test-Path $NotesFile)) {
+    $NotesFile = "$env:TEMP\\volo-release-$Version.md"
+    @"
+## v$Version
+
+### Changes
+- TBD
+"@ | Out-File -FilePath $NotesFile -Encoding utf8 -NoNewline
+    Write-Step "Placeholder notes written to $NotesFile (edit before continuing if you want real notes)"
+}
+
+# ---- 6. commit and tag -----------------------------------------------------
+
+git add manifest.json versions.json
+if (-not $SkipBuild) { git add main.js }
+$staged = @(git diff --cached --name-only)
+if ($staged.Count -eq 0) {
+    throw 'No staged changes. Aborting.'
+}
+
+$commitMsg = "v${Version}: release"
+Write-Step "Staged files:"
+$staged | ForEach-Object { Write-Host "    $_" }
+Write-Step "Commit message: $commitMsg"
+
+if ($DryRun) {
+    Write-Step "Dry run complete. Nothing committed or pushed."
+    # Restore working tree and unstage so future runs start clean.
+    git reset HEAD -- manifest.json versions.json | Out-Null
+    git checkout -- manifest.json versions.json
+    if (-not $SkipBuild -and (Test-Path 'main.js')) {
+        git reset HEAD -- main.js | Out-Null
+        git checkout -- main.js
+    }
+    return
+}
+
+git commit -m $commitMsg | Out-Null
+git tag $tag HEAD -m "Volo $tag" | Out-Null
+
+$newSha = git rev-parse HEAD
+Write-Step "Created commit $newSha and tag $tag"
+
+# ---- 7. push with retry ---------------------------------------------------
+
+Write-Step "git push origin main"
+Retry-Block -Block { git push origin main } -Attempts 6 -InitialBackoff 6
+
+Write-Step "git push origin $tag"
+Retry-Block -Block { git push origin $tag } -Attempts 6 -InitialBackoff 6
+
+# ---- 8. create release + upload assets ------------------------------------
+
+Write-Step "gh release create $tag"
+Retry-Block -Block {
+    gh release create $tag `
+        --repo $Repo `
+        --title "Volo $tag" `
+        --notes-file $NotesFile
+} -Attempts 4 -InitialBackoff 5
+
+Write-Step "gh release upload $tag (manifest.json, main.js, styles.css)"
+Retry-Block -Block {
+    gh release upload $tag manifest.json main.js styles.css --repo $Repo
+} -Attempts 4 -InitialBackoff 5
+
+# ---- 9. verify and report -------------------------------------------------
+
+Start-Sleep -Seconds 2
+$verify = Invoke-WebRequest -Uri "https://api.github.com/repos/$Repo/releases/tags/$tag" `
+    -Headers @{ 'Accept' = 'application/vnd.github+json' }
+$rel = ([System.Text.Encoding]::UTF8.GetString(
+    [System.Text.Encoding]::UTF8.GetBytes($verify.Content))) | ConvertFrom-Json
+
+if ($rel.tag_name -ne $tag) {
+    throw "Release verification failed: got tag $($rel.tag_name)"
+}
+
+Write-Step "Done"
+Write-Host "tag       : $tag"
+Write-Host "url       : $($rel.html_url)"
+Write-Host "assets    : $($rel.assets.Count)"
+$rel.assets | ForEach-Object { Write-Host "  - $($_.name)  ($($_.size) bytes)" }
