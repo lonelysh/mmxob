@@ -1,5 +1,5 @@
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, MarkdownView, Notice, TFile, Menu } from "obsidian";
-import { VIEW_TYPE_CHAT, VIEW_TYPE_AI_OUTLINE, QUICK_PROMPTS, QuickPrompt } from "../constants";
+import { VIEW_TYPE_CHAT, QUICK_PROMPTS, QuickPrompt } from "../constants";
 import type VoloPlugin from "../main";
 import { chat } from "../api/client";
 import { ProviderError } from "../api/errors";
@@ -44,6 +44,8 @@ export class ChatView extends ItemView {
   private currentAssistantText = "";
   /** 联网搜索开关（仅本视图实例有效，不持久化）。 */
   private webSearchEnabled = false;
+  /** 联网搜索可见切换按钮（v0.1.2 + 由 composer 直接控制）。 */
+  private searchToggleBtn!: HTMLButtonElement;
   /** quick prompt 互斥锁：避免双击导致并发请求。 */
   private quickPromptInFlight = false;
 
@@ -70,22 +72,15 @@ export class ChatView extends ItemView {
     root.addClass("volo-chat-root");
     this.rootEl = root;
 
-    /* -------- 顶部条：返回按钮（仅移动端可见）+ 状态 + 会话计数 + ⚙ -------- */
+    /* -------- 顶部状态条：状态 + 会话计数 + ⚙（无返回按钮；右栏自带 tab UI） -------- */
     const topBar = root.createDiv({ cls: "volo-top-bar" });
-    const backBtn = topBar.createEl("button", {
-      cls: "volo-back-btn",
-      attr: { "aria-label": "返回笔记", title: "返回笔记" },
-      text: "←",
-    });
-    backBtn.addEventListener("click", () => this.goBackToEditor());
-
     this.statusEl = topBar.createSpan({ cls: "volo-chat-status", text: "就绪" });
     this.sessionIndicatorEl = topBar.createSpan({
       cls: "volo-chat-session-indicator",
       text: ` · ${this.messages.length} 条`,
     });
 
-    /* ⚙ 会话 / 联网菜单（保留在状态行尾部） */
+    /* ⚙ 会话菜单（保留在状态行尾部） */
     this.gearBtn = topBar.createEl("button", {
       cls: "volo-chat-quick-gear",
       attr: { "aria-label": "会话操作", title: "会话操作" },
@@ -118,6 +113,14 @@ export class ChatView extends ItemView {
       cls: "volo-chat-input",
       attr: { placeholder: "输入消息…(Cmd/Ctrl+Enter 发送)", rows: "2" },
     });
+
+    /* 🔍 联网搜索可见开关（v0.1.2，置于 textarea 与发送按钮之间） */
+    this.searchToggleBtn = composerRow.createEl("button", {
+      cls: "volo-chat-search-toggle",
+      attr: { "aria-label": "联网搜索", title: "联网搜索：本次会话" },
+      text: "🔍",
+    });
+    this.searchToggleBtn.addEventListener("click", () => this.toggleWebSearch(this.searchToggleBtn));
 
     this.sendBtn = composerRow.createEl("button", {
       cls: "volo-btn volo-btn-primary",
@@ -481,34 +484,6 @@ export class ChatView extends ItemView {
   }
 
   /**
-   * 移动端抽屉式回退：先看激活的是不是 Markdown，否则兜底扫所有 leaf 找一个非 Chat/AI 大纲/empty 的切回去。
-   * 用 Set<WorkspaceLeaf> 直接以对象引用比对，避开未公开的 `leaf.id` API。
-   */
-  private goBackToEditor(): void {
-    const ws = this.plugin.app.workspace;
-    const md = ws.getActiveViewOfType(MarkdownView);
-    if (md) {
-      ws.setActiveLeaf(md.leaf, { focus: true });
-      return;
-    }
-    const excluded = new Set<WorkspaceLeaf>([
-      ...ws.getLeavesOfType(VIEW_TYPE_CHAT),
-      ...ws.getLeavesOfType(VIEW_TYPE_AI_OUTLINE),
-    ]);
-    let target: WorkspaceLeaf | null = null;
-    ws.iterateAllLeaves((leaf) => {
-      if (!target && !excluded.has(leaf) && leaf.view?.getViewType() !== "empty") {
-        target = leaf;
-      }
-    });
-    if (target) {
-      ws.setActiveLeaf(target, { focus: true });
-    } else {
-      new Notice("没有可返回的笔记");
-    }
-  }
-
-  /**
    * 找一个 Markdown 视图：先取当前激活的，否则从所有 markdown leaf 中兜底。
    * 移动端聊天常占满全屏、没有"激活"的 md 视图，必须兜底。
    */
@@ -611,14 +586,22 @@ export class ChatView extends ItemView {
 
   /* ---------------- 联网搜索 ---------------- */
 
-  private toggleWebSearch() {
+  /**
+   * v0.1.2+：由 composer 里的可见 🔍 按钮直接触发。
+   * 自动根据配置文件给出"未配置"的提示。
+   */
+  private toggleWebSearch(btn: HTMLButtonElement): void {
     this.webSearchEnabled = !this.webSearchEnabled;
-    new Notice(this.webSearchEnabled ? "本次会话开启联网搜索" : "本次会话关闭联网搜索");
+    btn.toggleClass("is-active", this.webSearchEnabled);
     if (this.webSearchEnabled) {
-      const ws = this.plugin.settings;
-      if (ws.webSearchProvider === "off" || (ws.webSearchProvider === "brave" && !ws.braveApiKey)) {
+      const cfg = this.plugin.settings;
+      if (cfg.webSearchProvider === "off" || (cfg.webSearchProvider === "brave" && !cfg.braveApiKey)) {
         new Notice("联网搜索未配置：去设置里选 provider 并填 API Key");
+      } else {
+        new Notice("🔍 已开启联网搜索（仅手动消息）");
       }
+    } else {
+      new Notice("已关闭联网搜索");
     }
   }
 
@@ -680,7 +663,7 @@ export class ChatView extends ItemView {
     menu.showAtMouseEvent(ev);
   }
 
-  /** ⚙ 按钮弹出的菜单：会话级操作 + 联网搜索开关。 */
+  /** ⚙ 按钮弹出的菜单：会话级操作（联网搜索改由 composer 内的 🔍 按钮控制）。 */
   private openGearMenu(ev: MouseEvent) {
     const menu = new Menu();
     menu.addItem((it) =>
@@ -688,12 +671,6 @@ export class ChatView extends ItemView {
     );
     menu.addItem((it) =>
       it.setTitle("新会话").setIcon("refresh-cw").onClick(() => this.newSession()),
-    );
-    menu.addItem((it) =>
-      it
-        .setTitle(this.webSearchEnabled ? "关闭联网搜索" : "开启联网搜索")
-        .setIcon("search")
-        .onClick(() => this.toggleWebSearch()),
     );
     menu.showAtMouseEvent(ev);
   }
@@ -741,27 +718,13 @@ export class ChatView extends ItemView {
       const rendered = applyTemplate(qp.prompt, { text, note });
       this.appendUser(rendered);
 
-      // 2. 建立 inflight，准备搜索 + 发请求
+      // 2. 建立 inflight（互斥锁 + 取消通道），直接发请求
+      // v0.1.2+：quick prompt 忽略 webSearchEnabled，绝不触发联网搜索。
       this.inflight = new AbortController();
-      const signal = this.inflight.signal;
 
       const chatMsgs: ChatMessage[] = [];
       const sys = this.plugin.settings.systemPrompt.trim();
       if (sys) chatMsgs.push({ role: "system", content: sys });
-
-      if (this.webSearchEnabled && this.plugin.settings.webSearchProvider !== "off") {
-        this.setStatus("搜索中…");
-        try {
-          const searchCtx = await this.maybeRunSearch(rendered, signal);
-          if (searchCtx) chatMsgs.push({ role: "system", content: searchCtx });
-        } catch (e) {
-          if ((e as Error)?.name === "AbortError") {
-            this.abort();
-            return;
-          }
-          // 非 abort 错误已在 maybeRunSearch 中提示过
-        }
-      }
 
       // 不再注入 active note 上下文，笔记正文已在 user prompt 里
       for (const m of this.messages.filter((x) => x.role !== "system")) {

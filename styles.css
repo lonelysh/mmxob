@@ -1,6 +1,8 @@
 /* ===========================================================
    Volo styles
-   v0.4.1 — 紧凑密度 + 空状态卡片 + ⚡ 快捷菜单 + 焦点感知
+   v0.1.2 — 回到右栏 tab：删除 v0.1.1 的返回按钮 / drawer
+           动画 / 100vh 100vw 覆写；composer 增加 🔍 联网
+           搜索可见开关。
    =========================================================== */
 
 .volo-chat-root {
@@ -204,7 +206,7 @@
   flex-direction: column;
   gap: 6px;
 }
-/* v0.1.1 顶部条：替代原 volo-chat-status-row；承载返回按钮（仅移动端可见）+ 状态 + 会话计数 + ⚙ */
+/* v0.1.2 顶部状态条：slim 行，只放状态 + 会话计数 + ⚙（v0.1.1 的返回按钮已删除）。 */
 .volo-top-bar {
   display: flex;
   align-items: center;
@@ -989,57 +991,43 @@
 }
 
 /* ===========================================================
-   v0.1.1 — Responsive activation
-   - Desktop: chat opens via getLeaf("split"), no special CSS needed
-   - Mobile: chat opens as full-screen tab; apply "drawer" treatment
-     so it feels like a slide-in overlay, with a back button at the top.
+   v0.1.2 — Responsive activation (reverted)
+   - Desktop + Mobile: chat opens via getRightLeaf(false); right
+     sidebar / mobile drawer sizes the view itself, no per-view
+     100vh/100vw override or slide-in animation is needed.
    =========================================================== */
 
-/* Back button — visible only on mobile, lives in the view header */
-.volo-back-btn {
+/* -----------------------------------------------------------
+   v0.1.2 — 联网搜索可见开关：置于 composer 行（textarea 与
+   发送按钮之间），与搜查询 toggle 共用同一份 .is-active 语义。
+   ----------------------------------------------------------- */
+.volo-chat-search-toggle {
   appearance: none;
-  background: transparent;
+  background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
-  color: var(--text-normal);
+  color: var(--text-muted);
   width: 36px;
   height: 36px;
   border-radius: 6px;
-  font-size: 16px;
+  font-size: 14px;
   cursor: pointer;
   padding: 0;
-  display: none;       /* hidden by default (desktop) */
+  flex: 0 0 auto;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   -webkit-tap-highlight-color: transparent;
-  line-height: 1;
   font-family: inherit;
 }
-.volo-back-btn:active {
+.volo-chat-search-toggle.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent, #fff);
+  border-color: var(--interactive-accent);
+}
+.volo-chat-search-toggle:active:not(.is-active) {
   background: var(--background-modifier-hover);
 }
-@media (max-width: 480px) {
-  .volo-back-btn {
-    display: inline-flex;
-  }
-}
-
-/* Slide-in animation for mobile */
-@keyframes volo-drawer-in {
-  from { transform: translateX(100%); opacity: 0.6; }
-  to   { transform: translateX(0);    opacity: 1;   }
-}
-@media (max-width: 480px) {
-  .volo-chat-root,
-  .volo-ao-root {
-    animation: volo-drawer-in 200ms ease-out;
-  }
-}
-
-/* On mobile, ensure the chat fills the screen with safe-area */
-@media (max-width: 480px) {
-  .volo-chat-root,
-  .volo-ao-root {
-    height: 100vh;
-    width: 100vw;
-  }
+.volo-chat-search-toggle:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
 }

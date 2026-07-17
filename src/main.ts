@@ -7,7 +7,6 @@ import { registerSelectionCommands } from "./commands/selection";
 import { registerNoteCommands } from "./commands/note";
 import { chat } from "./api/client";
 import { VIEW_TYPE_CHAT, VIEW_TYPE_AI_OUTLINE } from "./constants";
-import { isMobile } from "./utils/mobile";
 
 /**
  * Volo plugin (formerly MiniMax Assistant).
@@ -27,10 +26,10 @@ export default class VoloPlugin extends Plugin {
     this.addSettingTab(new VoloSettingsTab(this.app, this));
 
     // Ribbon：打开 Chat 视图
-    this.addRibbonIcon("message-square", "Volo：打开侧边栏聊天（桌面分栏 / 移动抽屉）", () => this.activateChatView());
+    this.addRibbonIcon("message-square", "Volo：右侧栏打开聊天", () => this.activateChatView());
 
     // Ribbon：打开 AI 大纲视图
-    this.addRibbonIcon("list-tree", "Volo：打开 AI 大纲（桌面分栏 / 移动抽屉）", () => this.activateAiOutlineView());
+    this.addRibbonIcon("list-tree", "Volo：右侧栏打开 AI 大纲", () => this.activateAiOutlineView());
 
     // 命令：直接打开 Chat 视图
     this.addCommand({
@@ -85,6 +84,10 @@ export default class VoloPlugin extends Plugin {
 
   async activateChatView(): Promise<void> {
     const { workspace } = this.app;
+    // 确保右栏可见，新 tab 才会展示给用户
+    if (workspace.rightSplit?.collapsed) {
+      workspace.rightSplit.expand();
+    }
     const existing = workspace.getLeavesOfType(VIEW_TYPE_CHAT);
     if (existing.length > 0) {
       // 已存在 → reveal + focus，不要移动现有 leaf（保留用户此前把它放在右栏的选择）
@@ -92,15 +95,10 @@ export default class VoloPlugin extends Plugin {
       workspace.setActiveLeaf(existing[0], { focus: true });
       return;
     }
-    // 不存在 → 桌面：split 当前激活 leaf；移动端：tab（cosematic drawer 由 CSS 处理）
-    let leaf: WorkspaceLeaf | null = null;
-    if (isMobile()) {
-      leaf = workspace.getLeaf("tab");
-    } else {
-      leaf = workspace.getLeaf("split");
-      // 兜底：极少数情况下 split 不可用，回退到 tab
-      if (!leaf) leaf = workspace.getLeaf("tab");
-    }
+    // 不存在 → 在右栏创建新 tab（桌面 + 移动端均走右栏）
+    let leaf: WorkspaceLeaf | null = workspace.getRightLeaf(false);
+    // 兜底：极少数情况下右栏不可用，回退到 tab
+    if (!leaf) leaf = workspace.getLeaf("tab");
     if (!leaf) {
       new Notice("无法创建 Chat 视图：没有可用的工作区 leaf");
       return;
@@ -112,6 +110,10 @@ export default class VoloPlugin extends Plugin {
 
   async activateAiOutlineView(): Promise<void> {
     const { workspace } = this.app;
+    // 确保右栏可见，新 tab 才会展示给用户
+    if (workspace.rightSplit?.collapsed) {
+      workspace.rightSplit.expand();
+    }
     const existing = workspace.getLeavesOfType(VIEW_TYPE_AI_OUTLINE);
     if (existing.length > 0) {
       // 已存在 → reveal + focus，不要移动现有 leaf（保留用户此前把它放在右栏的选择）
@@ -119,15 +121,10 @@ export default class VoloPlugin extends Plugin {
       workspace.setActiveLeaf(existing[0], { focus: true });
       return;
     }
-    // 不存在 → 桌面：split 当前激活 leaf；移动端：tab（cosematic drawer 由 CSS 处理）
-    let leaf: WorkspaceLeaf | null = null;
-    if (isMobile()) {
-      leaf = workspace.getLeaf("tab");
-    } else {
-      leaf = workspace.getLeaf("split");
-      // 兜底：极少数情况下 split 不可用，回退到 tab
-      if (!leaf) leaf = workspace.getLeaf("tab");
-    }
+    // 不存在 → 在右栏创建新 tab（桌面 + 移动端均走右栏）
+    let leaf: WorkspaceLeaf | null = workspace.getRightLeaf(false);
+    // 兜底：极少数情况下右栏不可用，回退到 tab
+    if (!leaf) leaf = workspace.getLeaf("tab");
     if (!leaf) {
       new Notice("无法创建 AI 大纲视图：没有可用的工作区 leaf");
       return;
