@@ -33,7 +33,6 @@ export class ChatView extends ItemView {
   private sendBtn!: HTMLButtonElement;
   private stopBtn!: HTMLButtonElement;
   private statusEl!: HTMLElement;
-  private contextLine!: HTMLElement;
   private gearBtn!: HTMLButtonElement;
   private messages: UiMessage[] = [];
   private inflight: AbortController | null = null;
@@ -52,9 +51,15 @@ export class ChatView extends ItemView {
   private searchPill!: HTMLButtonElement;
   /** 快捷提示 pill（v0.1.3：移至顶栏 pillCluster 中）。 */
   private quickMenuPill!: HTMLButtonElement;
-  private activeFolder: TFolder | null = null;
-  private folderPill!: HTMLButtonElement;
-  private obsidianPill!: HTMLButtonElement;
+  /** v0.1.6：context row（Beneath the composer）：three inline chips。 */
+  private contextRowEl!: HTMLElement;
+  private contextFileChipEl!: HTMLElement;
+  private contextFolderChipEl!: HTMLElement;
+  private contextDetailsEl!: HTMLElement;
+  /** v0.1.6：当前上下文范围（file = 当前笔记 / folder = contextFolder）。 */
+  private contextScope: "file" | "folder" = "file";
+  /** v0.1.6：选中的文件夹（folder scope 才有值）。 */
+  private contextFolder: TFolder | null = null;
   /** quick prompt 互斥锁：避免双击导致并发请求。 */
   private quickPromptInFlight = false;
 
@@ -81,12 +86,11 @@ export class ChatView extends ItemView {
     root.addClass("volo-chat-root");
     this.rootEl = root;
 
-    /* -------- 顶部状态条：Volo + 文件上下文 + 🔍/⚡/📁/Obsidian pills + ⚙ -------- */
+    /* -------- 顶部状态条：Volo + 🔍/⚡ pills + ⚙ -------- */
     const topBar = root.createDiv({ cls: "volo-chat-top-bar" });
     this.statusEl = topBar.createSpan({ cls: "volo-chat-brand", text: "Volo" });
-    this.contextLine = topBar.createSpan({ cls: "volo-context-line", text: "" });
 
-    /* v0.1.4 — pill 簇（顶栏右侧），承载搜索 / 快捷 / 文件夹 / Obsidian 语法 */
+    /* v0.1.4 pill 簇（v0.1.6 移除 folder/Obsidian pill，仅保留联网 / 快捷）。 */
     this.pillCluster = topBar.createDiv({ cls: "volo-pill-cluster" });
 
     /* 🔍 联网搜索 pill（toggle，激活时获得 .is-active） */
@@ -107,23 +111,6 @@ export class ChatView extends ItemView {
     this.quickMenuPill.createSpan({ cls: "volo-pill-label", text: "快捷" });
     this.quickMenuPill.addEventListener("click", (ev) => this.openQuickMenu(ev));
 
-    /* 📁 文件夹选择 pill */
-    this.folderPill = this.pillCluster.createEl("button", {
-      cls: "volo-pill",
-      attr: { "aria-label": "选择文件夹", title: "选择文件夹（用于跨文件操作）" },
-    });
-    this.folderPill.createSpan({ text: "📁", cls: "volo-pill-icon" });
-    this.folderPill.createSpan({ text: "文件夹", cls: "volo-pill-label" });
-    this.folderPill.addEventListener("click", () => this.pickFolder());
-
-    /* Obsidian 语法辅助 pill */
-    this.obsidianPill = this.pillCluster.createEl("button", {
-      cls: "volo-pill",
-      attr: { "aria-label": "Obsidian 语法", title: "Obsidian 语法" },
-    });
-    this.obsidianPill.createSpan({ text: "Obsidian", cls: "volo-pill-label" });
-    this.obsidianPill.addEventListener("click", (ev) => this.openObsidianMenu(ev));
-
     /* ⚙ 会话菜单（保留在状态行尾部） */
     this.gearBtn = topBar.createEl("button", {
       cls: "volo-chat-quick-gear",
@@ -132,9 +119,9 @@ export class ChatView extends ItemView {
     });
     this.gearBtn.addEventListener("click", (ev) => this.openGearMenu(ev));
 
-    this.refreshContextLine();
-    this.registerEvent(this.plugin.app.workspace.on("file-open", () => this.refreshContextLine()));
-    this.registerEvent(this.plugin.app.workspace.on("active-leaf-change", () => this.refreshContextLine()));
+    this.refreshContextRow();
+    this.registerEvent(this.plugin.app.workspace.on("file-open", () => this.refreshContextRow()));
+    this.registerEvent(this.plugin.app.workspace.on("active-leaf-change", () => this.refreshContextRow()));
     this.startContextRefresh();
 
     this.streamingOn = true;
@@ -184,6 +171,17 @@ export class ChatView extends ItemView {
 
     this.sendBtn.addEventListener("click", () => this.handleSend());
     this.stopBtn.addEventListener("click", () => this.abort());
+
+    /* v0.1.6 — context row（位于 composer 下方）：
+     *   file chip + folder chip + line details，11px 紧凑行。
+     */
+    const contextRow = inputArea.createDiv({ cls: "volo-chat-context-row" });
+    this.contextRowEl = contextRow;
+    this.contextFileChipEl = contextRow.createSpan({ cls: "volo-context-chip" });
+    this.contextFolderChipEl = contextRow.createSpan({ cls: "volo-context-chip" });
+    this.contextDetailsEl = contextRow.createSpan({ cls: "volo-context-details" });
+    this.contextFileChipEl.addEventListener("click", () => this.switchContextScope("file"));
+    this.contextFolderChipEl.addEventListener("click", () => this.openFolderPicker());
 
     this.renderAll();
   }
@@ -437,18 +435,15 @@ export class ChatView extends ItemView {
         // 非 abort 错误已在 maybeRunSearch 中提示过
       }
     }
-    if (this.plugin.settings.injectActiveNoteContext) {
-      const active = this.plugin.app.workspace.getActiveFile();
-      if (active instanceof TFile && active.extension === "md") {
-        const cache = this.plugin.app.metadataCache.getFileCache(active);
-        const title = active.basename;
+    if (this.plugin.settings.injectActiveNoteContext || this.contextScope === "folder") {
+      const ctx = await this.getCurrentContextText();
+      if (ctx.source) {
+        const title = ctx.noteTitle || "笔记";
         const body = truncateByChars(
-          noteContextBlock(title, this.stripFrontmatter((await this.plugin.app.vault.cachedRead(active)) ?? "")),
+          noteContextBlock(title, ctx.source),
           12000
         );
         if (body) chatMsgs.push({ role: "system", content: body });
-        // 用 cache 仅做诊断，目前用不到 frontmatter
-        void cache;
       }
     }
     for (const m of this.messages.filter((x) => x.role !== "system")) {
@@ -499,29 +494,122 @@ export class ChatView extends ItemView {
     new Notice("已开启新会话");
   }
 
-  private refreshContextLine(): void {
-    const file = this.plugin.app.workspace.getActiveFile();
-    if (!(file instanceof TFile) || file.extension !== "md") {
-      this.contextLine.textContent = "无文件";
+  /**
+   * v0.1.6 — 刷新 context row 内的三个 chip / details。
+   * 由 file-open / active-leaf-change / 1s polling 触发。
+   */
+  private refreshContextRow(): void {
+    const ws = this.plugin.app.workspace;
+    const file = ws.getActiveFile();
+
+    if (!file || !(file instanceof TFile)) {
+      this.contextFileChipEl.textContent = "无文件";
+      this.contextFileChipEl.removeClass("is-active");
+      this.contextFolderChipEl.textContent = "📁 选文件夹";
+      this.contextFolderChipEl.removeClass("is-active");
+      this.contextDetailsEl.textContent = "";
       return;
     }
 
-    const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
-    const selection = view?.editor?.getSelection() ?? "";
-    if (selection) {
-      const from = view!.editor.getCursor("from");
-      const to = view!.editor.getCursor("to");
-      const lineCount = to.line - from.line + 1;
-      this.contextLine.textContent =
-        `${file.basename}.md · Line${from.line + 1}-Line${to.line + 1}, ${lineCount}Lines`;
-      return;
+    // File chip
+    this.contextFileChipEl.textContent = file.basename;
+    if (this.contextScope === "file") {
+      this.contextFileChipEl.addClass("is-active");
+    } else {
+      this.contextFileChipEl.removeClass("is-active");
     }
-    this.contextLine.textContent = `${file.basename}.md`;
+
+    // Folder chip
+    if (this.contextFolder && this.contextScope === "folder") {
+      const files = this.contextFolder.children.filter((c) => c instanceof TFile).length;
+      this.contextFolderChipEl.textContent = `📁 ${this.contextFolder.name} (${files} 个文件)`;
+      this.contextFolderChipEl.addClass("is-active");
+      this.contextDetailsEl.textContent = "已切换到文件夹范围";
+    } else {
+      this.contextFolderChipEl.textContent = "📁 选文件夹";
+      this.contextFolderChipEl.removeClass("is-active");
+      if (this.contextScope === "folder") {
+        this.contextDetailsEl.textContent = "请选择一个文件夹";
+      } else {
+        this.contextDetailsEl.textContent = "默认当前笔记";
+      }
+    }
+
+    // Line range details (overrides when active markdown view has a selection)
+    const view = ws.getActiveViewOfType(MarkdownView);
+    const editor = view?.editor;
+    if (editor) {
+      const sel = editor.getSelection();
+      if (sel && sel.trim().length > 0) {
+        const from = editor.getCursor("from");
+        const to = editor.getCursor("to");
+        const lineCount = Math.abs(to.line - from.line) + 1;
+        this.contextDetailsEl.textContent = `Line${from.line + 1}-Line${to.line + 1}, ${lineCount}Lines`;
+      }
+    }
+  }
+
+  /** v0.1.6 — 切换上下文范围。点击 file chip 时切回 file 并清空 folder。 */
+  private switchContextScope(scope: "file" | "folder"): void {
+    if (scope === "file") {
+      this.contextScope = "file";
+      this.contextFolder = null;
+      new Notice("已切换到当前笔记");
+    } else {
+      this.contextScope = "folder";
+      if (!this.contextFolder) {
+        new Notice("请点击文件夹按钮选择一个");
+        return;
+      }
+    }
+    this.refreshContextRow();
+  }
+
+  /** v0.1.6 — 打开文件夹选择 modal；选完同步刷新 context row。 */
+  private openFolderPicker(): void {
+    new FolderSuggestModal(this.plugin.app, (folder) => {
+      if (folder) {
+        this.contextFolder = folder;
+        this.contextScope = "folder";
+        new Notice(`📁 ${folder.path}`);
+      }
+      this.refreshContextRow();
+    }).open();
+  }
+
+  /**
+   * v0.1.6 — 单一上下文来源（handleSend / runQuickPrompt 共用）：
+   *   - folder 范围：拼接 contextFolder 下所有 .md 文件，标题做分隔。
+   *   - file 范围：返回当前激活笔记（frontmatter 已剥）。
+   */
+  private async getCurrentContextText(): Promise<{ source: string; noteTitle: string }> {
+    if (this.contextScope === "folder" && this.contextFolder) {
+      const mdFiles = this.contextFolder.children.filter(
+        (c): c is TFile => c instanceof TFile && c.extension === "md",
+      );
+      const parts: string[] = [];
+      for (const f of mdFiles) {
+        const body = (await this.plugin.app.vault.cachedRead(f)) ?? "";
+        parts.push(`# ${f.basename}\n\n${this.stripFrontmatter(body)}`);
+      }
+      return { source: parts.join("\n\n---\n\n"), noteTitle: this.contextFolder.name };
+    }
+    const file = this.plugin.app.workspace.getActiveFile();
+    if (file instanceof TFile) {
+      const body = (await this.plugin.app.vault.cachedRead(file)) ?? "";
+      const active = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+      const sel = active?.editor?.getSelection();
+      const trimmed = sel && sel.trim().length > 0
+        ? this.stripFrontmatter(body)
+        : this.stripFrontmatter(body);
+      return { source: trimmed, noteTitle: file.basename };
+    }
+    return { source: "", noteTitle: "" };
   }
 
   private startContextRefresh(): void {
     if (this.contextRefreshTimer !== null) return;
-    this.contextRefreshTimer = window.setInterval(() => this.refreshContextLine(), 1000);
+    this.contextRefreshTimer = window.setInterval(() => this.refreshContextRow(), 1000);
   }
 
   private stopContextRefresh(): void {
@@ -529,45 +617,6 @@ export class ChatView extends ItemView {
       window.clearInterval(this.contextRefreshTimer);
       this.contextRefreshTimer = null;
     }
-  }
-
-  private pickFolder(): void {
-    new FolderSuggestModal(this.plugin.app, (folder) => {
-      this.activeFolder = folder;
-      if (this.folderPill) {
-        const labelEl = this.folderPill.querySelector(".volo-pill-label") as HTMLElement | null;
-        if (labelEl) labelEl.textContent = folder ? folder.name : "文件夹";
-        this.folderPill.toggleClass("is-active", folder !== null);
-      }
-      new Notice(folder ? `📁 ${folder.path}` : "已取消文件夹选择");
-    }).open();
-  }
-
-  private openObsidianMenu(ev: MouseEvent): void {
-    const items: Array<{ label: string; insert: string }> = [
-      { label: "内部链接", insert: "[[笔记名]]" },
-      { label: "嵌入笔记", insert: "![[笔记名]]" },
-      { label: "块引用", insert: "[[笔记名#^块ID]]" },
-      { label: "标题段落", insert: "[[笔记名#标题]]" },
-      { label: "标签", insert: "#标签" },
-      { label: "嵌套标签", insert: "#父/子" },
-      { label: "任务（未完成）", insert: "- [ ] " },
-      { label: "任务（已完成）", insert: "- [x] " },
-      { label: "高亮", insert: "==高亮==" },
-      { label: "加粗", insert: "**加粗**" },
-      { label: "斜体", insert: "*斜体*" },
-      { label: "行内代码", insert: "`code`" },
-      { label: "代码块", insert: "```\n\n```" },
-      { label: "引用", insert: "> " },
-      { label: "分割线", insert: "---" },
-    ];
-    const menu = new Menu();
-    for (const item of items) {
-      menu.addItem((it) =>
-        it.setTitle(item.label).onClick(() => this.insertAtCursor(item.insert)),
-      );
-    }
-    menu.showAtMouseEvent(ev);
   }
 
   private insertAtCursor(text: string): void {
@@ -717,8 +766,7 @@ export class ChatView extends ItemView {
   /* ---------------- 联网搜索 ---------------- */
 
   /**
-   * v0.1.3：由顶栏 pillCluster 里的 🔍 pill 直接触发。
-   * 自动根据配置文件给出"未配置"的提示。
+   * v0.1.6：notice 短化（不挡顶栏），pill 颜色变化为主反馈。
    */
   private toggleWebSearch(btn: HTMLButtonElement): void {
     this.webSearchEnabled = !this.webSearchEnabled;
@@ -726,12 +774,12 @@ export class ChatView extends ItemView {
     if (this.webSearchEnabled) {
       const cfg = this.plugin.settings;
       if (cfg.webSearchProvider === "off" || (cfg.webSearchProvider === "brave" && !cfg.braveApiKey)) {
-        new Notice("联网搜索未配置：去设置里选 provider 并填 API Key");
+        new Notice("联网未配置：去设置里选 provider");
       } else {
-        new Notice("🔍 已开启联网搜索（仅手动消息）");
+        new Notice("联网：开");
       }
     } else {
-      new Notice("已关闭联网搜索");
+      new Notice("联网：关");
     }
   }
 
@@ -819,7 +867,11 @@ export class ChatView extends ItemView {
       let note = "";
       const needsNote = qp.needsActiveNote === true || qp.context === "note";
       const needsSelection = qp.needsSelection === true || qp.context === "selection";
-      if (needsNote) {
+      // v0.1.6：folder scope 强制覆盖 note 来源；其它情况维持既有逻辑。
+      if (this.contextScope === "folder") {
+        const ctx = await this.getCurrentContextText();
+        note = truncateByChars(ctx.source, 12000);
+      } else if (needsNote) {
         const view = this.findMarkdownView();
         if (!view) {
           new Notice("请先打开 Markdown 笔记");

@@ -1004,10 +1004,72 @@
   align-items: center;
   gap: 6px;
   margin-left: auto;
-  margin-right: 6px;
   flex: 0 0 auto;            /* do not grow; respect margin-left:auto */
   align-self: center;
 }
 .volo-pill-cluster:empty {
   display: none;
+}
+
+/* ===========================================================
+   v0.1.6 — Context row beneath composer (file chip + folder chip + line details)
+   - 顶栏移到右抽屉时不应触发侧栏撑大；所有顶级 chat 行强制 min-width:0
+   - 11px 紧凑色，pill 形状（圆角），点击切换 scope
+   =========================================================== */
+.volo-chat-root,
+.volo-chat-top-bar,
+.volo-chat-messages,
+.volo-chat-input-area,
+.volo-chat-composer-row,
+.volo-chat-context-row {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.volo-chat-context-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  padding: 4px 10px calc(4px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: transparent;
+  flex: 0 0 auto;
+}
+
+.volo-context-chip {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  user-select: none;
+  background: transparent;
+  font-family: inherit;
+}
+.volo-context-chip:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.volo-context-chip.is-active {
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border);
+}
+
+.volo-context-details {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
