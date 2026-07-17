@@ -1,5 +1,5 @@
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, MarkdownView, Notice, TFile, Menu } from "obsidian";
-import { VIEW_TYPE_CHAT, QUICK_PROMPTS, QuickPrompt } from "../constants";
+import { VIEW_TYPE_CHAT, VIEW_TYPE_AI_OUTLINE, QUICK_PROMPTS, QuickPrompt } from "../constants";
 import type VoloPlugin from "../main";
 import { chat } from "../api/client";
 import { ProviderError } from "../api/errors";
@@ -70,22 +70,30 @@ export class ChatView extends ItemView {
     root.addClass("volo-chat-root");
     this.rootEl = root;
 
-    /* -------- 状态 -------- */
-    const statusRow = root.createDiv({ cls: "volo-chat-status-row" });
-    this.statusEl = statusRow.createSpan({ cls: "volo-chat-status", text: "就绪" });
-    this.statusEl.style.flex = "0 0 auto";
-    this.sessionIndicatorEl = statusRow.createSpan({ cls: "volo-chat-session-indicator" });
-    this.sessionIndicatorEl.style.flex = "1 1 auto";
-    this.sessionIndicatorEl.style.textAlign = "right";
-    this.streamingOn = true;
+    /* -------- 顶部条：返回按钮（仅移动端可见）+ 状态 + 会话计数 + ⚙ -------- */
+    const topBar = root.createDiv({ cls: "volo-top-bar" });
+    const backBtn = topBar.createEl("button", {
+      cls: "volo-back-btn",
+      attr: { "aria-label": "返回笔记", title: "返回笔记" },
+      text: "←",
+    });
+    backBtn.addEventListener("click", () => this.goBackToEditor());
 
-    /* ⚙ 会话 / 联网菜单（从原 quick-row 迁移到状态行尾部） */
-    this.gearBtn = statusRow.createEl("button", {
+    this.statusEl = topBar.createSpan({ cls: "volo-chat-status", text: "就绪" });
+    this.sessionIndicatorEl = topBar.createSpan({
+      cls: "volo-chat-session-indicator",
+      text: ` · ${this.messages.length} 条`,
+    });
+
+    /* ⚙ 会话 / 联网菜单（保留在状态行尾部） */
+    this.gearBtn = topBar.createEl("button", {
       cls: "volo-chat-quick-gear",
       attr: { "aria-label": "会话操作", title: "会话操作" },
       text: "⚙",
     });
     this.gearBtn.addEventListener("click", (ev) => this.openGearMenu(ev));
+
+    this.streamingOn = true;
 
     /* -------- 消息列表 -------- */
     this.messagesEl = root.createDiv({ cls: "volo-chat-messages" });
@@ -470,6 +478,34 @@ export class ChatView extends ItemView {
     ws.setActiveLeaf(view.leaf, { focus: true });
     ws.revealLeaf(view.leaf);
     new Notice("已切换到编辑器");
+  }
+
+  /**
+   * 移动端抽屉式回退：先看激活的是不是 Markdown，否则兜底扫所有 leaf 找一个非 Chat/AI 大纲/empty 的切回去。
+   * 用 Set<WorkspaceLeaf> 直接以对象引用比对，避开未公开的 `leaf.id` API。
+   */
+  private goBackToEditor(): void {
+    const ws = this.plugin.app.workspace;
+    const md = ws.getActiveViewOfType(MarkdownView);
+    if (md) {
+      ws.setActiveLeaf(md.leaf, { focus: true });
+      return;
+    }
+    const excluded = new Set<WorkspaceLeaf>([
+      ...ws.getLeavesOfType(VIEW_TYPE_CHAT),
+      ...ws.getLeavesOfType(VIEW_TYPE_AI_OUTLINE),
+    ]);
+    let target: WorkspaceLeaf | null = null;
+    ws.iterateAllLeaves((leaf) => {
+      if (!target && !excluded.has(leaf) && leaf.view?.getViewType() !== "empty") {
+        target = leaf;
+      }
+    });
+    if (target) {
+      ws.setActiveLeaf(target, { focus: true });
+    } else {
+      new Notice("没有可返回的笔记");
+    }
   }
 
   /**

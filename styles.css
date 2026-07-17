@@ -204,14 +204,24 @@
   flex-direction: column;
   gap: 6px;
 }
-.volo-chat-status-row {
+/* v0.1.1 顶部条：替代原 volo-chat-status-row；承载返回按钮（仅移动端可见）+ 状态 + 会话计数 + ⚙ */
+.volo-top-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 1px 10px;
-  font-size: 11px;
-  color: var(--text-muted);
+  padding: 4px 10px;
   border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small, 12px);
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+.volo-top-bar .volo-chat-status {
+  flex: 0 0 auto;
+}
+.volo-top-bar .volo-chat-session-indicator {
+  flex: 1 1 auto;
+  text-align: right;
 }
 .volo-chat-status {
   font-size: 11px;
@@ -314,7 +324,7 @@
   .volo-chat-messages {
     padding: 6px 8px;
   }
-  .volo-chat-status-row {
+  .volo-top-bar {
     padding-left: 8px;
     padding-right: 8px;
   }
@@ -975,5 +985,61 @@
     width: 32px;
     height: 32px;
     min-height: 32px;
+  }
+}
+
+/* ===========================================================
+   v0.1.1 — Responsive activation
+   - Desktop: chat opens via getLeaf("split"), no special CSS needed
+   - Mobile: chat opens as full-screen tab; apply "drawer" treatment
+     so it feels like a slide-in overlay, with a back button at the top.
+   =========================================================== */
+
+/* Back button — visible only on mobile, lives in the view header */
+.volo-back-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0;
+  display: none;       /* hidden by default (desktop) */
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  line-height: 1;
+  font-family: inherit;
+}
+.volo-back-btn:active {
+  background: var(--background-modifier-hover);
+}
+@media (max-width: 480px) {
+  .volo-back-btn {
+    display: inline-flex;
+  }
+}
+
+/* Slide-in animation for mobile */
+@keyframes volo-drawer-in {
+  from { transform: translateX(100%); opacity: 0.6; }
+  to   { transform: translateX(0);    opacity: 1;   }
+}
+@media (max-width: 480px) {
+  .volo-chat-root,
+  .volo-ao-root {
+    animation: volo-drawer-in 200ms ease-out;
+  }
+}
+
+/* On mobile, ensure the chat fills the screen with safe-area */
+@media (max-width: 480px) {
+  .volo-chat-root,
+  .volo-ao-root {
+    height: 100vh;
+    width: 100vw;
   }
 }

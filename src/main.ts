@@ -27,10 +27,10 @@ export default class VoloPlugin extends Plugin {
     this.addSettingTab(new VoloSettingsTab(this.app, this));
 
     // Ribbon：打开 Chat 视图
-    this.addRibbonIcon("message-square", "Volo：打开侧边栏聊天", () => this.activateChatView());
+    this.addRibbonIcon("message-square", "Volo：打开侧边栏聊天（桌面分栏 / 移动抽屉）", () => this.activateChatView());
 
     // Ribbon：打开 AI 大纲视图
-    this.addRibbonIcon("list-tree", "Volo：打开 AI 大纲", () => this.activateAiOutlineView());
+    this.addRibbonIcon("list-tree", "Volo：打开 AI 大纲（桌面分栏 / 移动抽屉）", () => this.activateAiOutlineView());
 
     // 命令：直接打开 Chat 视图
     this.addCommand({
@@ -87,18 +87,18 @@ export default class VoloPlugin extends Plugin {
     const { workspace } = this.app;
     const existing = workspace.getLeavesOfType(VIEW_TYPE_CHAT);
     if (existing.length > 0) {
-      // 已存在 → reveal + focus。revealLeaf 顺带展开右侧栏（若折叠）
+      // 已存在 → reveal + focus，不要移动现有 leaf（保留用户此前把它放在右栏的选择）
       workspace.revealLeaf(existing[0]);
       workspace.setActiveLeaf(existing[0], { focus: true });
       return;
     }
-    // 不存在 → 在右侧栏新建 leaf；移动端走主容器 tab
+    // 不存在 → 桌面：split 当前激活 leaf；移动端：tab（cosematic drawer 由 CSS 处理）
     let leaf: WorkspaceLeaf | null = null;
     if (isMobile()) {
       leaf = workspace.getLeaf("tab");
     } else {
-      leaf = workspace.getRightLeaf(false);
-      // 兜底：如果拿不到（极端情况），改用主区
+      leaf = workspace.getLeaf("split");
+      // 兜底：极少数情况下 split 不可用，回退到 tab
       if (!leaf) leaf = workspace.getLeaf("tab");
     }
     if (!leaf) {
@@ -114,18 +114,18 @@ export default class VoloPlugin extends Plugin {
     const { workspace } = this.app;
     const existing = workspace.getLeavesOfType(VIEW_TYPE_AI_OUTLINE);
     if (existing.length > 0) {
-      // 已存在 → reveal + focus。revealLeaf 顺带展开右侧栏（若折叠）
+      // 已存在 → reveal + focus，不要移动现有 leaf（保留用户此前把它放在右栏的选择）
       workspace.revealLeaf(existing[0]);
       workspace.setActiveLeaf(existing[0], { focus: true });
       return;
     }
-    // 不存在 → 在右侧栏新建 leaf；移动端走主容器 tab
+    // 不存在 → 桌面：split 当前激活 leaf；移动端：tab（cosematic drawer 由 CSS 处理）
     let leaf: WorkspaceLeaf | null = null;
     if (isMobile()) {
       leaf = workspace.getLeaf("tab");
     } else {
-      leaf = workspace.getRightLeaf(false);
-      // 兜底：如果拿不到（极端情况），改用主区
+      leaf = workspace.getLeaf("split");
+      // 兜底：极少数情况下 split 不可用，回退到 tab
       if (!leaf) leaf = workspace.getLeaf("tab");
     }
     if (!leaf) {

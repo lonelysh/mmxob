@@ -1,5 +1,5 @@
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, MarkdownView, Notice, TFile, Menu } from "obsidian";
-import { VIEW_TYPE_AI_OUTLINE } from "../constants";
+import { VIEW_TYPE_CHAT, VIEW_TYPE_AI_OUTLINE } from "../constants";
 import type VoloPlugin from "../main";
 import { chat } from "../api/client";
 import { ProviderError } from "../api/errors";
@@ -83,6 +83,15 @@ export class AiOutlineView extends ItemView {
     root.empty();
     root.addClass("volo-ao-root");
     this.rootEl = root;
+
+    /* -------- 顶部条：返回按钮（仅移动端可见） -------- */
+    const topBar = root.createDiv({ cls: "volo-top-bar" });
+    const backBtn = topBar.createEl("button", {
+      cls: "volo-back-btn",
+      attr: { "aria-label": "返回笔记", title: "返回笔记" },
+      text: "←",
+    });
+    backBtn.addEventListener("click", () => this.goBackToEditor());
 
     /* -------- 头部（标题 + ⚙） -------- */
     const header = root.createDiv({ cls: "volo-ao-header" });
@@ -795,6 +804,34 @@ export class AiOutlineView extends ItemView {
     ws.setActiveLeaf(view.leaf, { focus: true });
     ws.revealLeaf(view.leaf);
     new Notice("已切换到编辑器");
+  }
+
+  /**
+   * 移动端抽屉式回退：与 ChatView 同款逻辑，跳过 Chat/AI 大纲/empty leaf，
+   * 切到最近一个笔记 leaf。
+   */
+  private goBackToEditor(): void {
+    const ws = this.plugin.app.workspace;
+    const md = ws.getActiveViewOfType(MarkdownView);
+    if (md) {
+      ws.setActiveLeaf(md.leaf, { focus: true });
+      return;
+    }
+    const excluded = new Set<WorkspaceLeaf>([
+      ...ws.getLeavesOfType(VIEW_TYPE_CHAT),
+      ...ws.getLeavesOfType(VIEW_TYPE_AI_OUTLINE),
+    ]);
+    let target: WorkspaceLeaf | null = null;
+    ws.iterateAllLeaves((leaf) => {
+      if (!target && !excluded.has(leaf) && leaf.view?.getViewType() !== "empty") {
+        target = leaf;
+      }
+    });
+    if (target) {
+      ws.setActiveLeaf(target, { focus: true });
+    } else {
+      new Notice("没有可返回的笔记");
+    }
   }
 
   /**
