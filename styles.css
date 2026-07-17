@@ -1,8 +1,8 @@
 /* ===========================================================
    Volo styles
-   v0.1.2 — 回到右栏 tab：删除 v0.1.1 的返回按钮 / drawer
-           动画 / 100vh 100vw 覆写；composer 增加 🔍 联网
-           搜索可见开关。
+   v0.1.3 — Pills refactor
+            - 🔍 联网 / ⚡ 快捷 从 composer 移到 top bar pill cluster
+            - 引入通用 .volo-pill 视觉语言（小、低视觉权重、激活时高亮）
    =========================================================== */
 
 .volo-chat-root {
@@ -234,6 +234,12 @@
   gap: 6px;
   align-items: stretch;
 }
+/* v0.1.3 — composer row is now just textarea + send/stop. Make sure the send button
+   stays at intrinsic width (do not flex-grow alongside textarea). */
+.volo-chat-composer-row .volo-btn {
+  flex: 0 0 auto;
+  align-self: stretch;
+}
 .volo-chat-input {
   flex: 1 1 auto;
   min-height: 36px;
@@ -345,39 +351,6 @@
   .volo-chat-root {
     width: 100%;
   }
-}
-
-/* ===========================================================
-   v0.3.1 — ⚡ composer menu button (left of textarea)
-   =========================================================== */
-
-.volo-chat-quick-menu-btn {
-  appearance: none;
-  border: 1px solid var(--background-modifier-border);
-  background: var(--background-secondary);
-  color: var(--text-normal);
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 15px;
-  padding: 0;
-  flex: 0 0 auto;
-  -webkit-tap-highlight-color: transparent;
-  align-self: stretch;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.volo-chat-quick-menu-btn:hover {
-  background: var(--background-modifier-hover);
-}
-.volo-chat-quick-menu-btn:active {
-  background: var(--background-modifier-hover);
-}
-.volo-chat-quick-menu-btn:focus-visible {
-  outline: 2px solid var(--interactive-accent);
-  outline-offset: 2px;
 }
 
 /* ===========================================================
@@ -727,64 +700,22 @@
   color: var(--text-muted);
 }
 .volo-ao-scope-pill {
-  appearance: none;
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 999px;
-  padding: 2px 8px;
-  min-height: 24px;
-  font-size: 11px;
-  cursor: pointer;
-  color: var(--text-normal);
-  font-family: inherit;
-  -webkit-tap-highlight-color: transparent;
   flex: 0 0 auto;
 }
+/* v0.1.3 — visual base provided by .volo-pill; only state-specific overrides remain */
 .volo-ao-scope-pill:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
-.volo-ao-scope-pill:hover:not(:disabled) {
-  background: var(--background-modifier-hover);
-}
-.volo-ao-scope-pill:focus-visible {
-  outline: 2px solid var(--interactive-accent);
-  outline-offset: 1px;
-}
-
-.volo-ao-quick-search-toggle {
-  margin-left: auto;
-  appearance: none;
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 999px;
-  padding: 2px 8px;
-  min-height: 24px;
-  font-size: 12px;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-family: inherit;
-  flex: 0 0 auto;
-  -webkit-tap-highlight-color: transparent;
-}
-.volo-ao-quick-search-toggle:hover {
-  background: var(--background-modifier-hover);
-}
-.volo-ao-quick-search-toggle:focus-visible {
-  outline: 2px solid var(--interactive-accent);
-  outline-offset: 1px;
-}
-.volo-ao-quick-search-toggle.is-active {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent, #fff);
-  border-color: var(--interactive-accent);
-}
+/* ".volo-ao-quick-search-toggle" is purely behavioral in v0.1.3 — the .volo-pill class
+   provides size/color/border-radius. The button lives inside .volo-pill-cluster which
+   handles the margin-left:auto push. No additional rules required. */
 
 .volo-ao-status {
   flex: 0 0 auto;
   font-size: 11px;
   color: var(--text-muted);
-  margin-left: 4px;
+  margin-right: auto;       /* v0.1.3 — push pill cluster to right */
 }
 
 /* ---- 消息区 ---- */
@@ -993,41 +924,77 @@
 /* ===========================================================
    v0.1.2 — Responsive activation (reverted)
    - Desktop + Mobile: chat opens via getRightLeaf(false); right
-     sidebar / mobile drawer sizes the view itself, no per-view
-     100vh/100vw override or slide-in animation is needed.
+      sidebar / mobile drawer sizes the view itself, no per-view
+      100vh/100vw override or slide-in animation is needed.
    =========================================================== */
 
-/* -----------------------------------------------------------
-   v0.1.2 — 联网搜索可见开关：置于 composer 行（textarea 与
-   发送按钮之间），与搜查询 toggle 共用同一份 .is-active 语义。
-   ----------------------------------------------------------- */
-.volo-chat-search-toggle {
+/* ===========================================================
+   v0.1.3 — Refined toggles
+   - Pill-shaped buttons for mode toggles (web search, quick prompts)
+   - Replaces the larger button-style toggles in the composer
+   - Smaller, lower visual weight; accent only when active
+   =========================================================== */
+
+.volo-pill {
   appearance: none;
-  background: var(--background-secondary);
+  background: transparent;
   border: 1px solid var(--background-modifier-border);
   color: var(--text-muted);
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
-  font-size: 14px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
   cursor: pointer;
-  padding: 0;
-  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
   -webkit-tap-highlight-color: transparent;
   font-family: inherit;
+  line-height: 1;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
 }
-.volo-chat-search-toggle.is-active {
+.volo-pill:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.volo-pill.is-active {
   background: var(--interactive-accent);
   color: var(--text-on-accent, #fff);
   border-color: var(--interactive-accent);
 }
-.volo-chat-search-toggle:active:not(.is-active) {
-  background: var(--background-modifier-hover);
+.volo-pill.is-active:hover {
+  background: var(--interactive-accent-hover, var(--interactive-accent));
+  filter: brightness(1.08);
 }
-.volo-chat-search-toggle:focus-visible {
+.volo-pill:focus-visible {
   outline: 2px solid var(--interactive-accent);
-  outline-offset: 2px;
+  outline-offset: 1px;
+}
+.volo-pill-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+.volo-pill-label {
+  font-size: 12px;
+}
+@media (max-width: 480px) {
+  .volo-pill {
+    height: 32px;       /* Touch target on mobile */
+    padding: 0 12px;
+  }
+}
+
+/* Pills cluster — used in top bar to host multiple pills in a row */
+.volo-pill-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;       /* push to right side of top bar */
+  margin-right: 6px;
+}
+.volo-pill-cluster:empty {
+  display: none;            /* hide cluster if no pills */
 }

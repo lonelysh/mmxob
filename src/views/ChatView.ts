@@ -44,8 +44,12 @@ export class ChatView extends ItemView {
   private currentAssistantText = "";
   /** 联网搜索开关（仅本视图实例有效，不持久化）。 */
   private webSearchEnabled = false;
-  /** 联网搜索可见切换按钮（v0.1.2 + 由 composer 直接控制）。 */
-  private searchToggleBtn!: HTMLButtonElement;
+  /** 顶栏 pill 簇容器（v0.1.3；承载 🔍 联网 / ⚡ 快捷两颗 pill）。 */
+  private pillCluster!: HTMLElement;
+  /** 联网搜索 pill（v0.1.3：移至顶栏 pillCluster 中）。 */
+  private searchPill!: HTMLButtonElement;
+  /** 快捷提示 pill（v0.1.3：移至顶栏 pillCluster 中）。 */
+  private quickMenuPill!: HTMLButtonElement;
   /** quick prompt 互斥锁：避免双击导致并发请求。 */
   private quickPromptInFlight = false;
 
@@ -72,13 +76,34 @@ export class ChatView extends ItemView {
     root.addClass("volo-chat-root");
     this.rootEl = root;
 
-    /* -------- 顶部状态条：状态 + 会话计数 + ⚙（无返回按钮；右栏自带 tab UI） -------- */
+    /* -------- 顶部状态条：状态 + 会话计数 + 🔍/⚡ pills + ⚙（v0.1.3 pill 移入） -------- */
     const topBar = root.createDiv({ cls: "volo-top-bar" });
     this.statusEl = topBar.createSpan({ cls: "volo-chat-status", text: "就绪" });
     this.sessionIndicatorEl = topBar.createSpan({
       cls: "volo-chat-session-indicator",
       text: ` · ${this.messages.length} 条`,
     });
+
+    /* v0.1.3 — pill 簇（顶栏右侧），承载搜索 / 快捷两颗 pill */
+    this.pillCluster = topBar.createDiv({ cls: "volo-pill-cluster" });
+
+    /* 🔍 联网搜索 pill（toggle，激活时获得 .is-active） */
+    this.searchPill = this.pillCluster.createEl("button", {
+      cls: "volo-pill",
+      attr: { "aria-label": "联网搜索", title: "联网搜索：本次会话" },
+    });
+    this.searchPill.createSpan({ cls: "volo-pill-icon", text: "🔍" });
+    this.searchPill.createSpan({ cls: "volo-pill-label", text: "联网" });
+    this.searchPill.addEventListener("click", () => this.toggleWebSearch(this.searchPill));
+
+    /* ⚡ 快捷提示 pill（非 toggle：点击弹出快捷菜单） */
+    this.quickMenuPill = this.pillCluster.createEl("button", {
+      cls: "volo-pill",
+      attr: { "aria-label": "快捷操作", title: "快捷操作" },
+    });
+    this.quickMenuPill.createSpan({ cls: "volo-pill-icon", text: "⚡" });
+    this.quickMenuPill.createSpan({ cls: "volo-pill-label", text: "快捷" });
+    this.quickMenuPill.addEventListener("click", (ev) => this.openQuickMenu(ev));
 
     /* ⚙ 会话菜单（保留在状态行尾部） */
     this.gearBtn = topBar.createEl("button", {
@@ -98,29 +123,13 @@ export class ChatView extends ItemView {
     /* -------- 输入区 -------- */
     const inputArea = root.createDiv({ cls: "volo-chat-input-area" });
 
-    // 文本框 + 按钮
+    // v0.1.3 — composer 行只剩 textarea + 发送/停止。pill 已挪到顶栏。
     const composerRow = inputArea.createDiv({ cls: "volo-chat-composer-row" });
-
-    /* ⚡ 快捷操作菜单按钮（置于 textarea 左侧） */
-    const quickMenuBtn = composerRow.createEl("button", {
-      cls: "volo-chat-quick-menu-btn",
-      attr: { "aria-label": "快捷操作", title: "快捷操作" },
-      text: "⚡",
-    });
-    quickMenuBtn.addEventListener("click", (ev) => this.openQuickMenu(ev));
 
     this.inputEl = composerRow.createEl("textarea", {
       cls: "volo-chat-input",
       attr: { placeholder: "输入消息…(Cmd/Ctrl+Enter 发送)", rows: "2" },
     });
-
-    /* 🔍 联网搜索可见开关（v0.1.2，置于 textarea 与发送按钮之间） */
-    this.searchToggleBtn = composerRow.createEl("button", {
-      cls: "volo-chat-search-toggle",
-      attr: { "aria-label": "联网搜索", title: "联网搜索：本次会话" },
-      text: "🔍",
-    });
-    this.searchToggleBtn.addEventListener("click", () => this.toggleWebSearch(this.searchToggleBtn));
 
     this.sendBtn = composerRow.createEl("button", {
       cls: "volo-btn volo-btn-primary",
@@ -587,7 +596,7 @@ export class ChatView extends ItemView {
   /* ---------------- 联网搜索 ---------------- */
 
   /**
-   * v0.1.2+：由 composer 里的可见 🔍 按钮直接触发。
+   * v0.1.3：由顶栏 pillCluster 里的 🔍 pill 直接触发。
    * 自动根据配置文件给出"未配置"的提示。
    */
   private toggleWebSearch(btn: HTMLButtonElement): void {
@@ -663,7 +672,7 @@ export class ChatView extends ItemView {
     menu.showAtMouseEvent(ev);
   }
 
-  /** ⚙ 按钮弹出的菜单：会话级操作（联网搜索改由 composer 内的 🔍 按钮控制）。 */
+  /** ⚙ 按钮弹出的菜单：会话级操作（联网搜索改由顶栏 🔍 pill 控制，v0.1.3）。 */
   private openGearMenu(ev: MouseEvent) {
     const menu = new Menu();
     menu.addItem((it) =>

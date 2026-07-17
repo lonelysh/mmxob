@@ -106,23 +106,28 @@ export class AiOutlineView extends ItemView {
     const chatWrap = root.createDiv({ cls: "volo-ao-chat-wrap" });
 
     const chatHeader = chatWrap.createDiv({ cls: "volo-ao-chat-header" });
-    chatHeader.createSpan({ cls: "volo-ao-chat-scope", text: "针对" });
-    this.scopePill = chatHeader.createEl("button", {
-      cls: "volo-ao-scope-pill",
+
+    /* v0.1.3：状态文字居于左，pill 簇推到右。
+       簇里依次是 "针对" 提示 + scope pill + 联网搜索 pill。 */
+    this.statusEl = chatHeader.createSpan({ cls: "volo-ao-status" });
+    this.statusEl.textContent = "";
+
+    const pillCluster = chatHeader.createDiv({ cls: "volo-pill-cluster" });
+    pillCluster.createSpan({ cls: "volo-ao-chat-scope", text: "针对" });
+
+    this.scopePill = pillCluster.createEl("button", {
+      cls: "volo-pill volo-ao-scope-pill",
       attr: { "aria-label": "切换作用域", title: "切换作用域" },
       text: "当前章节 ▾",
     });
     this.scopePill.addEventListener("click", (ev) => this.openScopeMenu(ev));
 
-    this.searchBtn = chatHeader.createEl("button", {
-      cls: "volo-ao-quick-search-toggle",
+    this.searchBtn = pillCluster.createEl("button", {
+      cls: "volo-pill volo-ao-quick-search-toggle",
       attr: { "aria-label": "联网搜索", title: "联网搜索（本次会话）" },
       text: "🔍",
     });
     this.searchBtn.addEventListener("click", () => this.toggleWebSearch(this.searchBtn));
-
-    this.statusEl = chatHeader.createSpan({ cls: "volo-ao-status" });
-    this.statusEl.textContent = "";
 
     this.messagesEl = chatWrap.createDiv({ cls: "volo-ao-messages" });
     this.messagesEl.setAttribute("role", "log");
