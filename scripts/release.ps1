@@ -190,6 +190,10 @@ if (-not $NotesFile -or -not (Test-Path $NotesFile)) {
 
 git add manifest.json versions.json package.json
 if (-not $SkipBuild) { git add main.js }
+# styles.css is part of the plugin runtime — must be tracked in the release
+# commit too, otherwise the tagged commit points at the previous styles.css
+# while the release asset points at the working tree version. Split-brain.
+if (Test-Path 'styles.css') { git add styles.css }
 $staged = @(git diff --cached --name-only)
 if ($staged.Count -eq 0) {
     throw 'No staged changes. Aborting.'
@@ -205,6 +209,7 @@ if ($DryRun) {
     # Restore working tree and unstage so future runs start clean.
     $restore = @('manifest.json', 'versions.json')
     if (Test-Path 'package.json') { $restore += 'package.json' }
+    if (Test-Path 'styles.css') { $restore += 'styles.css' }
     git reset HEAD -- $restore | Out-Null
     git checkout -- $restore
     if (-not $SkipBuild -and (Test-Path 'main.js')) {
