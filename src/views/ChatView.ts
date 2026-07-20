@@ -51,8 +51,9 @@ export class ChatView extends ItemView {
   private searchPill!: HTMLButtonElement;
   /** 快捷提示 pill（v0.1.3：移至顶栏 pillCluster 中）。 */
   private quickMenuPill!: HTMLButtonElement;
-  /** v0.1.6：context row（Beneath the composer）：three inline chips。 */
-  private contextRowEl!: HTMLElement;
+  /** v0.1.6：context row（Beneath the composer）：three inline chips。
+   *  v0.1.12：contextRowEl 拆掉了；contextFileChipEl + contextDetailsEl 抬到顶部
+   *            note context 行；contextFolderChipEl 沉到最底部的 folder picker。 */
   private contextFileChipEl!: HTMLElement;
   private contextFolderChipEl!: HTMLElement;
   private contextDetailsEl!: HTMLElement;
@@ -86,14 +87,27 @@ export class ChatView extends ItemView {
     root.addClass("volo-chat-root");
     this.rootEl = root;
 
-    /* -------- 顶部状态条：Volo + 🔍/⚡ pills + ⚙ -------- */
+    /* v0.1.13 — 重构 onOpen：所有 DOM 节点先建完，再注册监听 / 调 refresh。
+     * 之前（v0.1.6 起）onOpen 是「边建边用」：建完 topBar 就立刻调
+     * refreshContextRow()，但那时 contextFolderChipEl / contextDetailsEl
+     * 还没被赋值，第一次刷新直接 TypeError，后续 messagesEl / inputArea /
+     * folderPicker / renderAll 全没机会跑，整页只剩顶部两行甚至空白。
+     * 这次按 DOM 顺序先建完所有节点再统一注册 + 刷新。
+     */
+
+    /* -------- 1. v0.1.12 note context（顶部：📄 + 文件名 + 行号 / 选区详情） -------- */
+    const noteContext = root.createDiv({ cls: "volo-chat-note-context" });
+    noteContext.createSpan({ cls: "volo-note-context-icon", text: "📄" });
+    this.contextFileChipEl = noteContext.createSpan({ cls: "volo-context-chip" });
+    this.contextDetailsEl = noteContext.createSpan({ cls: "volo-context-details" });
+    this.contextFileChipEl.addEventListener("click", () => this.switchContextScope("file"));
+
+    /* -------- 2. 顶部状态条：Volo + 🔍/⚡ pills + ⚙ -------- */
     const topBar = root.createDiv({ cls: "volo-chat-top-bar" });
     this.statusEl = topBar.createSpan({ cls: "volo-chat-brand", text: "Volo" });
 
-    /* v0.1.4 pill 簇（v0.1.6 移除 folder/Obsidian pill，仅保留联网 / 快捷）。 */
     this.pillCluster = topBar.createDiv({ cls: "volo-pill-cluster" });
 
-    /* 🔍 联网搜索 pill（toggle，激活时获得 .is-active） */
     this.searchPill = this.pillCluster.createEl("button", {
       cls: "volo-pill",
       attr: { "aria-label": "联网搜索", title: "联网搜索：本次会话" },
@@ -102,7 +116,6 @@ export class ChatView extends ItemView {
     this.searchPill.createSpan({ cls: "volo-pill-label", text: "联网" });
     this.searchPill.addEventListener("click", () => this.toggleWebSearch(this.searchPill));
 
-    /* ⚡ 快捷提示 pill（非 toggle：点击弹出快捷菜单） */
     this.quickMenuPill = this.pillCluster.createEl("button", {
       cls: "volo-pill",
       attr: { "aria-label": "快捷操作", title: "快捷操作" },
@@ -111,7 +124,6 @@ export class ChatView extends ItemView {
     this.quickMenuPill.createSpan({ cls: "volo-pill-label", text: "快捷" });
     this.quickMenuPill.addEventListener("click", (ev) => this.openQuickMenu(ev));
 
-    /* ⚙ 会话菜单（保留在状态行尾部） */
     this.gearBtn = topBar.createEl("button", {
       cls: "volo-chat-quick-gear",
       attr: { "aria-label": "会话操作", title: "会话操作" },
@@ -119,22 +131,13 @@ export class ChatView extends ItemView {
     });
     this.gearBtn.addEventListener("click", (ev) => this.openGearMenu(ev));
 
-    this.refreshContextRow();
-    this.registerEvent(this.plugin.app.workspace.on("file-open", () => this.refreshContextRow()));
-    this.registerEvent(this.plugin.app.workspace.on("active-leaf-change", () => this.refreshContextRow()));
-    this.startContextRefresh();
-
-    this.streamingOn = true;
-
-    /* -------- 消息列表 -------- */
+    /* -------- 3. 消息列表 -------- */
     this.messagesEl = root.createDiv({ cls: "volo-chat-messages" });
     this.messagesEl.setAttr("role", "log");
     this.messagesEl.setAttr("aria-live", "polite");
 
-    /* -------- 输入区 -------- */
+    /* -------- 4. 输入区：composer（textarea + 发送 / 停止） -------- */
     const inputArea = root.createDiv({ cls: "volo-chat-input-area" });
-
-    // v0.1.3 — composer 行只剩 textarea + 发送/停止。pill 已挪到顶栏。
     const composerRow = inputArea.createDiv({ cls: "volo-chat-composer-row" });
 
     this.inputEl = composerRow.createEl("textarea", {
@@ -154,6 +157,20 @@ export class ChatView extends ItemView {
     });
     this.stopBtn.style.display = "none";
 
+    /* -------- 5. v0.1.12 folder picker（最底部：📁 按钮） --------
+     * 在 refresh 之前建好，否则 refreshContextRow() 访问
+     * contextFolderChipEl.parentElement 会抛 TypeError。
+     */
+    const folderPicker = root.createDiv({ cls: "volo-chat-folder-picker" });
+    const folderPickerBtn = folderPicker.createEl("button", {
+      cls: "volo-folder-picker-btn",
+      attr: { "aria-label": "选择文件夹", title: "点击选择文件夹" },
+    });
+    folderPickerBtn.createSpan({ cls: "volo-folder-picker-icon", text: "📁" });
+    this.contextFolderChipEl = folderPickerBtn.createSpan({ cls: "volo-folder-picker-label" });
+    folderPickerBtn.addEventListener("click", () => this.openFolderPicker());
+
+    /* -------- 6. 注册余下的事件监听 -------- */
     this.inputEl.addEventListener("keydown", (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
@@ -161,7 +178,6 @@ export class ChatView extends ItemView {
       }
     });
 
-    /* 焦点感知：focus 时让 root 获得 is-input-focused 类 */
     this.inputEl.addEventListener("focus", () => {
       this.rootEl.addClass("is-input-focused");
     });
@@ -172,16 +188,12 @@ export class ChatView extends ItemView {
     this.sendBtn.addEventListener("click", () => this.handleSend());
     this.stopBtn.addEventListener("click", () => this.abort());
 
-    /* v0.1.6 — context row（位于 composer 下方）：
-     *   file chip + folder chip + line details，11px 紧凑行。
-     */
-    const contextRow = inputArea.createDiv({ cls: "volo-chat-context-row" });
-    this.contextRowEl = contextRow;
-    this.contextFileChipEl = contextRow.createSpan({ cls: "volo-context-chip" });
-    this.contextFolderChipEl = contextRow.createSpan({ cls: "volo-context-chip" });
-    this.contextDetailsEl = contextRow.createSpan({ cls: "volo-context-details" });
-    this.contextFileChipEl.addEventListener("click", () => this.switchContextScope("file"));
-    this.contextFolderChipEl.addEventListener("click", () => this.openFolderPicker());
+    /* -------- 7. 此时所有节点都已就绪，第一次刷新安全 -------- */
+    this.streamingOn = true;
+    this.refreshContextRow();
+    this.registerEvent(this.plugin.app.workspace.on("file-open", () => this.refreshContextRow()));
+    this.registerEvent(this.plugin.app.workspace.on("active-leaf-change", () => this.refreshContextRow()));
+    this.startContextRefresh();
 
     this.renderAll();
   }
@@ -200,6 +212,9 @@ export class ChatView extends ItemView {
   }
 
   private setBusy(busy: boolean) {
+    // v0.1.13: guard. abort() and onClose() can fire before onOpen finishes
+    // setting up sendBtn / stopBtn / inputEl, which used to TypeError.
+    if (!this.sendBtn || !this.stopBtn || !this.inputEl) return;
     this.sendBtn.style.display = busy ? "none" : "";
     this.stopBtn.style.display = busy ? "" : "none";
     this.inputEl.disabled = busy;
@@ -495,57 +510,68 @@ export class ChatView extends ItemView {
   }
 
   /**
-   * v0.1.6 — 刷新 context row 内的三个 chip / details。
+   * v0.1.6 / v0.1.12 / v0.1.13 — 刷新 note context（顶部）和 folder picker（底部）。
    * 由 file-open / active-leaf-change / 1s polling 触发。
+   * v0.1.12 拆分后：file chip + line details 走顶部 note context 行；
+   *               folder picker button 走最底部的独立行。
+   *
+   * v0.1.13 防御：所有 chip 字段都加上可选链保护。即便 onOpen 之外的某条路径
+   * （例如 workspace 事件在 view 半初始化时触发）再次让 chip 还没赋值，
+   * 本方法也只会静默 no-op，而不是抛 TypeError 把整个 view 弄崩。
    */
   private refreshContextRow(): void {
     const ws = this.plugin.app.workspace;
     const file = ws.getActiveFile();
 
+    // ---- 顶部 note context：file chip + 行号/选区详情 ----
+    if (!this.contextFileChipEl || !this.contextDetailsEl) return;
     if (!file || !(file instanceof TFile)) {
       this.contextFileChipEl.textContent = "无文件";
       this.contextFileChipEl.removeClass("is-active");
-      this.contextFolderChipEl.textContent = "📁 选文件夹";
-      this.contextFolderChipEl.removeClass("is-active");
       this.contextDetailsEl.textContent = "";
-      return;
-    }
-
-    // File chip
-    this.contextFileChipEl.textContent = file.basename;
-    if (this.contextScope === "file") {
-      this.contextFileChipEl.addClass("is-active");
     } else {
-      this.contextFileChipEl.removeClass("is-active");
+      this.contextFileChipEl.textContent = file.basename;
+      if (this.contextScope === "file") {
+        this.contextFileChipEl.addClass("is-active");
+      } else {
+        this.contextFileChipEl.removeClass("is-active");
+      }
+
+      const view = ws.getActiveViewOfType(MarkdownView);
+      const editor = view?.editor;
+      if (editor) {
+        const sel = editor.getSelection();
+        if (sel && sel.trim().length > 0) {
+          const from = editor.getCursor("from");
+          const to = editor.getCursor("to");
+          const lineCount = Math.abs(to.line - from.line) + 1;
+          this.contextDetailsEl.textContent =
+            `Line${from.line + 1}-Line${to.line + 1}, ${lineCount}Lines`;
+        } else {
+          this.contextDetailsEl.textContent = this.contextScope === "folder"
+            ? "已切换到文件夹范围"
+            : "默认当前笔记";
+        }
+      } else {
+        this.contextDetailsEl.textContent = this.contextScope === "folder"
+          ? "已切换到文件夹范围"
+          : "默认当前笔记";
+      }
     }
 
-    // Folder chip
+    // ---- 底部 folder picker ----
+    if (!this.contextFolderChipEl) return;
+    const folderBtn = this.contextFolderChipEl.parentElement;
     if (this.contextFolder && this.contextScope === "folder") {
       const files = this.contextFolder.children.filter((c) => c instanceof TFile).length;
-      this.contextFolderChipEl.textContent = `📁 ${this.contextFolder.name} (${files} 个文件)`;
-      this.contextFolderChipEl.addClass("is-active");
-      this.contextDetailsEl.textContent = "已切换到文件夹范围";
+      this.contextFolderChipEl.textContent = `${this.contextFolder.name} · ${files} 个文件`;
+      folderBtn?.addClass("is-active");
+    } else if (this.contextScope === "folder") {
+      this.contextFolderChipEl.textContent = "请选择文件夹";
+      folderBtn?.removeClass("is-active");
     } else {
-      this.contextFolderChipEl.textContent = "📁 选文件夹";
-      this.contextFolderChipEl.removeClass("is-active");
-      if (this.contextScope === "folder") {
-        this.contextDetailsEl.textContent = "请选择一个文件夹";
-      } else {
-        this.contextDetailsEl.textContent = "默认当前笔记";
-      }
-    }
-
-    // Line range details (overrides when active markdown view has a selection)
-    const view = ws.getActiveViewOfType(MarkdownView);
-    const editor = view?.editor;
-    if (editor) {
-      const sel = editor.getSelection();
-      if (sel && sel.trim().length > 0) {
-        const from = editor.getCursor("from");
-        const to = editor.getCursor("to");
-        const lineCount = Math.abs(to.line - from.line) + 1;
-        this.contextDetailsEl.textContent = `Line${from.line + 1}-Line${to.line + 1}, ${lineCount}Lines`;
-      }
+      this.contextFolderChipEl.textContent = "选文件夹";
+      folderBtn?.removeClass("is-active");
     }
   }
 
