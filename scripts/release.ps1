@@ -41,12 +41,20 @@ Set-Location (Split-Path -Parent $PSScriptRoot)
 # ---- helpers ---------------------------------------------------------------
 
 function Get-GitHubToken {
+    # Prefer env-var tokens so users can override, but fall back to the token
+    # already proven to work for `gh release create` (and `git push` via
+    # `gh auth setup-git`). Classic PATs (ghp_*) silently rot — fine-grained
+    # PATs (github_pat_*) are what `gh auth login` now issues, and they're
+    # scoped per repo, so this fallback is the only thing that keeps the
+    # release script working once a User-scope env var token expires.
     $candidates = @('GH_TOKEN', 'GITHUB_TOKEN', 'GH_TOKENS')
     foreach ($name in $candidates) {
         $t = [System.Environment]::GetEnvironmentVariable($name, 'User')
         if ($t) { return $t }
     }
-    throw 'No GitHub token. Set GH_TOKEN at User scope.'
+    $ghTok = (& gh auth token 2>$null)
+    if ($ghTok) { return $ghTok.Trim() }
+    throw 'No GitHub token. Set GH_TOKEN at User scope, or run `gh auth login`.'
 }
 
 function Write-Step {
@@ -139,6 +147,21 @@ if ($versions.PSObject.Properties.Name -contains $Version) {
 Write-Step "manifest.json -> version=$Version, minAppVersion=$MinAppVersion (was $prevVersion)"
 Write-Step "versions.json -> added $Version : $MinAppVersion"
 
+# ---- 3b. update package.json (if present) ---------------------------------
+
+if (Test-Path 'package.json') {
+    $pkgPath = Resolve-Path 'package.json'
+    $pkg = Get-Content -Raw -Path $pkgPath | ConvertFrom-Json
+    $prevPkgVersion = $pkg.version
+    if ($prevPkgVersion -ne $Version) {
+        $pkg.version = $Version
+        ($pkg | ConvertTo-Json -Depth 5) + "`n" | Out-File -FilePath $pkgPath -Encoding utf8 -NoNewline
+        Write-Step "package.json -> version=$Version (was $prevPkgVersion)"
+    } else {
+        Write-Step "package.json -> version=$Version (no change)"
+    }
+}
+
 # ---- 4. build (optional) --------------------------------------------------
 
 if ($SkipBuild) {
@@ -165,7 +188,7 @@ if (-not $NotesFile -or -not (Test-Path $NotesFile)) {
 
 # ---- 6. commit and tag -----------------------------------------------------
 
-git add manifest.json versions.json
+git add manifest.json versions.json package.json
 if (-not $SkipBuild) { git add main.js }
 $staged = @(git diff --cached --name-only)
 if ($staged.Count -eq 0) {
@@ -180,8 +203,10 @@ Write-Step "Commit message: $commitMsg"
 if ($DryRun) {
     Write-Step "Dry run complete. Nothing committed or pushed."
     # Restore working tree and unstage so future runs start clean.
-    git reset HEAD -- manifest.json versions.json | Out-Null
-    git checkout -- manifest.json versions.json
+    $restore = @('manifest.json', 'versions.json')
+    if (Test-Path 'package.json') { $restore += 'package.json' }
+    git reset HEAD -- $restore | Out-Null
+    git checkout -- $restore
     if (-not $SkipBuild -and (Test-Path 'main.js')) {
         git reset HEAD -- main.js | Out-Null
         git checkout -- main.js
@@ -213,9 +238,9 @@ Retry-Block -Block {
         --notes-file $NotesFile
 } -Attempts 4 -InitialBackoff 5
 
-Write-Step "gh release upload $tag (manifest.json, main.js, styles.css)"
+Write-Step "gh release upload $tag (manifest.json, main.js, styles.css, versions.json)"
 Retry-Block -Block {
-    gh release upload $tag manifest.json main.js styles.css --repo $Repo
+    gh release upload $tag manifest.json main.js styles.css versions.json --repo $Repo
 } -Attempts 4 -InitialBackoff 5
 
 # ---- 9. verify and report -------------------------------------------------
